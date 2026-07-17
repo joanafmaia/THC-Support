@@ -1,4 +1,4 @@
-# 🐻 EOS Support Bot
+# 🐻 THC Support Bot
 
 A modern Discord bot to **schedule and manage automatic events** using slash commands. Perfect for games, communities, and automation.
 
@@ -18,8 +18,8 @@ A modern Discord bot to **schedule and manage automatic events** using slash com
 
 ### 1. **Clone the Repository**
 ```bash
-git clone https://github.com/your-username/eos-support-bot.git
-cd eos-support-bot
+git clone https://github.com/your-username/thc-support-bot.git
+cd thc-support-bot
 ```
 
 ### 2. **Install Dependencies**
@@ -163,7 +163,7 @@ The bot runs a web server on port 3000 with the following endpoints:
 ## 📁 Project Structure
 
 ```
-eos-support-bot/
+thc-support-bot/
 ├── index.js                     # Bot main file
 ├── scheduler.js                 # Scheduling engine
 ├── config.js                    # Centralized configuration
@@ -339,4 +339,4 @@ Found a bug? Create an issue on GitHub or contact the maintainer.
 
 ---
 
-**Built with ❤️ for the EOS community**
+**Built with ❤️ for the THC community**
