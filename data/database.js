@@ -1,45 +1,36 @@
-import Database from "better-sqlite3";
-import fs from "fs";
+import { MongoClient } from "mongodb";
+import { CONFIG } from "../config.js";
+import { logger } from "../logger.js";
 
-const dbPath = "./data/events.db";
+let client;
+let db;
 
-// Ensure the folder exists
-if (!fs.existsSync("./data")) {
-  fs.mkdirSync("./data");
+export async function connectDatabase() {
+  if (db) return db;
+
+  client = new MongoClient(CONFIG.MONGODB_URI);
+  await client.connect();
+  db = client.db();
+
+  const events = db.collection("events");
+  await events.createIndex({ id: 1 }, { unique: true });
+  await events.createIndex({ enabled: 1, next_run: 1 });
+
+  logger.info("MongoDB connected", "database");
+  return db;
 }
 
-const db = new Database(dbPath);
-
-// Create table if it doesn't exist
-db.prepare(`
-  CREATE TABLE IF NOT EXISTS events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    channel_id TEXT NOT NULL,
-    message TEXT NOT NULL,
-
-    -- When to send (UTC, ISO string)
-    next_run TEXT NOT NULL,
-
-    -- repeat: once | daily | every2days | weekly | monthly
-    repeat_type TEXT NOT NULL,
-
-    -- For weekly: 0-6 (Sun-Sat). For monthly: 1-31. Otherwise null
-    repeat_value INTEGER,
-
-    enabled INTEGER DEFAULT 1,
-
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  )
-`).run();
-
-const existingColumns = db.prepare("PRAGMA table_info(events)").all().map((col) => col.name);
-if (!existingColumns.includes("last_error")) {
-  db.prepare("ALTER TABLE events ADD COLUMN last_error TEXT").run();
-}
-if (!existingColumns.includes("last_attempt_at")) {
-  db.prepare("ALTER TABLE events ADD COLUMN last_attempt_at TEXT").run();
+export function getDb() {
+  if (!db) {
+    throw new Error("Database not connected. Call connectDatabase() first.");
+  }
+  return db;
 }
 
-export default db;
+export async function closeDatabase() {
+  if (client) {
+    await client.close();
+    client = undefined;
+    db = undefined;
+  }
+}

@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { exportAllEvents } from "./data/events.js";
 import { logger } from "./logger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -11,24 +12,24 @@ const backupStatus = {
   lastError: null,
 };
 
-// Ensure backup directory exists
 if (!fs.existsSync(BACKUP_DIR)) {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
 }
 
 /**
- * Create a backup of the database
+ * Export all events to a JSON backup file
  */
-export function backupDatabase() {
+export async function backupDatabase() {
   try {
     const timestamp = new Date().toISOString().split("T")[0];
-    const backupPath = path.join(BACKUP_DIR, `events-${timestamp}.db`);
+    const backupPath = path.join(BACKUP_DIR, `events-${timestamp}.json`);
 
-    // Only create if it doesn't already exist today
     if (!fs.existsSync(backupPath)) {
-      fs.copyFileSync(path.join(__dirname, "data", "events.db"), backupPath);
+      const events = await exportAllEvents();
+      fs.writeFileSync(backupPath, JSON.stringify(events, null, 2), "utf-8");
       logger.info(`Database backed up: ${backupPath}`, "backup");
     }
+
     backupStatus.lastBackupAt = new Date().toISOString();
     backupStatus.lastBackupPath = backupPath;
     backupStatus.lastError = null;
@@ -42,11 +43,9 @@ export function backupDatabase() {
  * Start automatic backups
  */
 export function startBackupSchedule(intervalHours = 24) {
-  // Backup immediately on startup
   backupDatabase();
 
-  // Then schedule periodic backups
-  setInterval(backupDatabase, intervalHours * 60 * 60 * 1000);
+  setInterval(() => backupDatabase(), intervalHours * 60 * 60 * 1000);
   logger.info(`Database backups scheduled every ${intervalHours} hours`, "backup");
 }
 

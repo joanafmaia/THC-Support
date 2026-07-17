@@ -12,6 +12,8 @@ services:
         value: production
       - key: DISCORD_TOKEN
         sync: false
+      - key: MONGODB_URI
+        sync: false
       - key: LOG_LEVEL
         value: info
       - key: BACKUP_INTERVAL_HOURS
@@ -22,8 +24,3 @@ services:
         value: "60000"
       - key: STATS_TOKEN
         sync: false
-    # Disco persistente (apenas planos pagos). Descomenta e muda plan para starter:
-    # disk:
-    #   name: eos-data
-    #   mountPath: /opt/render/project/src/data
-    #   sizeGB: 1

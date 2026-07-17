@@ -1,5 +1,12 @@
 import { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } from "discord.js";
-import db from "../data/database.js";
+import {
+  getEventById,
+  updateEventById,
+  listEvents,
+  listEventsForPreview,
+  getEventForPreview,
+  setEventEnabled,
+} from "../data/events.js";
 import { logger } from "../logger.js";
 import {
   createErrorEmbed,
@@ -375,7 +382,7 @@ export default {
         repeatValue: repeatValue ?? null,
       });
 
-      const id = addEvent(
+      const id = await addEvent(
         name,
         channelId,
         message,
@@ -406,7 +413,7 @@ export default {
 
     if (sub === "edit") {
       const id = interaction.options.getInteger("id", true);
-      const existing = db.prepare("SELECT * FROM events WHERE id = ?").get(id);
+      const existing = await getEventById(id);
       if (!existing) {
         return interaction.editReply({
           embeds: [createErrorEmbed("Event not found", `No event exists with ID #${id}.`)],
@@ -537,14 +544,17 @@ export default {
         });
       })();
 
-      db.prepare(`
-        UPDATE events
-        SET name = ?, channel_id = ?, message = ?, next_run = ?, repeat_type = ?, repeat_value = ?, updated_at = datetime('now')
-        WHERE id = ?
-      `).run(name, channelId, message, nextRun, repeat, repeatValue ?? null, id);
+      await updateEventById(id, {
+        name,
+        channel_id: channelId,
+        message,
+        next_run: nextRun,
+        repeat_type: repeat,
+        repeat_value: repeatValue ?? null,
+      });
 
       logger.info(`Event updated: ${name} (ID: ${id})`, "event-command");
-      const refreshed = db.prepare("SELECT * FROM events WHERE id = ?").get(id);
+      const refreshed = await getEventById(id);
       return interaction.editReply({
         embeds: [
           createSuccessEmbed(
@@ -557,7 +567,7 @@ export default {
     }
 
     if (sub === "next") {
-      const next = getNextEvent();
+      const next = await getNextEvent();
       if (!next) {
         return interaction.editReply({
           embeds: [createInfoEmbed("No scheduled events", "There are no upcoming events.")],
@@ -567,15 +577,7 @@ export default {
     }
 
     if (sub === "list") {
-      const rows = db
-        .prepare(
-          `
-          SELECT id, name, channel_id, next_run, repeat_type, repeat_value, enabled
-          FROM events
-          ORDER BY enabled DESC, next_run ASC
-        `
-        )
-        .all();
+      const rows = await listEvents();
 
       if (!rows.length) {
         return interaction.editReply({
@@ -608,15 +610,7 @@ export default {
       }
 
       if (all) {
-        const rows = db
-          .prepare(
-            `
-            SELECT id, name, message, enabled, next_run
-            FROM events
-            ORDER BY enabled DESC, next_run ASC
-          `
-          )
-          .all();
+        const rows = await listEventsForPreview();
 
         if (!rows.length) {
           return interaction.editReply({
@@ -627,9 +621,7 @@ export default {
         return interaction.editReply({ embeds: [createEventPreviewListEmbed(rows)] });
       }
 
-      const event = db
-        .prepare("SELECT id, name, message, enabled, next_run FROM events WHERE id = ?")
-        .get(id);
+      const event = await getEventForPreview(id);
 
       if (!event) {
         return interaction.editReply({
@@ -669,7 +661,7 @@ export default {
     }
 
     if (sub === "due") {
-      const due = getDueEvents(new Date().toISOString());
+      const due = await getDueEvents(new Date().toISOString());
       if (!due.length) {
         return interaction.editReply({
           embeds: [createInfoEmbed("Nothing due", "No events are due right now.")],
@@ -683,8 +675,8 @@ export default {
 
     if (sub === "enable") {
       const id = interaction.options.getInteger("id", true);
-      const res = db.prepare("UPDATE events SET enabled = 1, updated_at = datetime('now') WHERE id = ?").run(id);
-      if (!res.changes) {
+      const enabled = await setEventEnabled(id, true);
+      if (!enabled) {
         logger.warn(`Event not found: ${id}`, "event-command");
         return interaction.editReply({
           embeds: [createErrorEmbed("Event not found", `No event exists with ID #${id}.`)],
@@ -698,8 +690,8 @@ export default {
 
     if (sub === "disable") {
       const id = interaction.options.getInteger("id", true);
-      const res = db.prepare("UPDATE events SET enabled = 0, updated_at = datetime('now') WHERE id = ?").run(id);
-      if (!res.changes) {
+      const disabled = await setEventEnabled(id, false);
+      if (!disabled) {
         logger.warn(`Event not found: ${id}`, "event-command");
         return interaction.editReply({
           embeds: [createErrorEmbed("Event not found", `No event exists with ID #${id}.`)],
@@ -713,7 +705,7 @@ export default {
 
     if (sub === "run") {
       const id = interaction.options.getInteger("id", true);
-      const ev = db.prepare("SELECT * FROM events WHERE id = ?").get(id);
+      const ev = await getEventById(id);
       if (!ev) {
         logger.warn(`Event not found for run: ${id}`, "event-command");
         return interaction.editReply({
@@ -742,14 +734,14 @@ export default {
 
     if (sub === "delete") {
       const id = interaction.options.getInteger("id", true);
-      const exists = db.prepare("SELECT id FROM events WHERE id = ?").get(id);
+      const exists = await getEventById(id);
       if (!exists) {
         logger.warn(`Event not found for delete: ${id}`, "event-command");
         return interaction.editReply({
           embeds: [createErrorEmbed("Event not found", `No event exists with ID #${id}.`)],
         });
       }
-      deleteEvent(id);
+      await deleteEvent(id);
       logger.info(`Event deleted: ${id}`, "event-command");
       return interaction.editReply({
         embeds: [createSuccessEmbed("Event deleted", `Event #${id} has been deleted.`)],

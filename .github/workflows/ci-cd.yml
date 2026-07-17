@@ -37,6 +37,7 @@ jobs:
           node --check backup.js
           node --check rateLimit.js
           node --check data/database.js
+          node --check data/events.js
 
       - name: "Lint code"
         run: echo "Linting configuration would go here"

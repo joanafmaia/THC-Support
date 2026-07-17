@@ -13,7 +13,7 @@ export const CONFIG = {
   PORT: process.env.PORT || 3000,
 
   // Database
-  DB_PATH: "./data/events.db",
+  MONGODB_URI: process.env.MONGODB_URI,
 
   // Scheduler
   CHECK_INTERVAL_MS: Number(process.env.CHECK_INTERVAL_MS) || 60_000, // 1 minute

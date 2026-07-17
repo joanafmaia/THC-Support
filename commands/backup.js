@@ -17,7 +17,7 @@ export default {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     if (sub === "now") {
-      backupDatabase();
+      await backupDatabase();
       return interaction.editReply("✅ Backup triggered.");
     }
 

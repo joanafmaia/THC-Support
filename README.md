@@ -5,7 +5,7 @@ A modern Discord bot to **schedule and manage automatic events** using slash com
 ## ✨ Features
 
 - ✅ **Slash Commands** (`/event create`, `/event list`, etc.)
-- ✅ **Database Scheduling** (SQLite)
+- ✅ **Database Scheduling** (MongoDB Atlas)
 - ✅ **Multiple Repeat Types** (once, daily, every2days, weekly, monthly)
 - ✅ **UTC Timezone** (globally compatible)
 - ✅ **Modern Discord Embeds**
@@ -31,9 +31,18 @@ npm install
 Create a `.env` file in the project root:
 ```env
 DISCORD_TOKEN=your_discord_token_here
+MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/eos-support?retryWrites=true&w=majority
 PORT=3000
 LOG_LEVEL=info
 ```
+
+**Como criar o MongoDB Atlas (gratuito):**
+1. Cria conta em [MongoDB Atlas](https://www.mongodb.com/cloud/atlas)
+2. Cria um cluster **M0 Free**
+3. Em **Database Access**, cria um utilizador com password
+4. Em **Network Access**, adiciona `0.0.0.0/0` (permite ligação do Render)
+5. Clica **Connect → Drivers** e copia a connection string
+6. Substitui `<password>` e define o nome da base de dados (ex: `eos-support`)
 
 **How to get your Discord token:**
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
@@ -61,13 +70,13 @@ O projeto inclui um `render.yaml` pronto para usar.
 1. Faz push do repositório para o GitHub
 2. No [Render Dashboard](https://dashboard.render.com), clica em **New → Blueprint**
 3. Liga o repositório e confirma o blueprint
-4. Define a variável `DISCORD_TOKEN` (obrigatória)
+4. Define as variáveis `DISCORD_TOKEN` e `MONGODB_URI` (obrigatórias)
 5. Opcionalmente define `STATS_TOKEN` para proteger `/stats`
 6. Aguarda o deploy — o Render usa `npm install` e `npm start`
 
 O serviço expõe `/health` para health checks.
 
-> **Base de dados:** No plano gratuito, os dados SQLite são temporários (perdem-se em redeploy). Para persistência, usa um plano pago no Render e descomenta o bloco `disk` no `render.yaml`.
+> **Base de dados:** Os eventos são guardados no **MongoDB Atlas** (plano gratuito). Os dados persistem mesmo no plano gratuito do Render — não precisas de disco pago.
 
 > **Nota:** No plano gratuito do Render, o serviço pode adormecer após inatividade. Usa o UptimeRobot (passo seguinte) para o manter acordado.
 
@@ -165,9 +174,9 @@ eos-support-bot/
 ├── commands/
 │   └── event.js                 # /event command (create, list, etc.)
 ├── data/
-│   ├── database.js              # SQLite initialization
-│   └── events.db                # Database (auto-generated)
-├── backups/                     # Daily database backups (auto-generated)
+│   ├── database.js              # MongoDB connection
+│   └── events.js                # Event CRUD operations
+├── backups/                     # Daily JSON backups (auto-generated)
 ├── .github/
 │   └── workflows/
 │       └── ci-cd.yml            # GitHub Actions CI/CD
@@ -183,19 +192,20 @@ eos-support-bot/
 
 ## 🗄️ Database
 
-The `events` table contains:
+Os eventos são guardados no **MongoDB Atlas** (coleção `events`):
 
 | Field | Type | Description |
-|-------|------|-----------|
-| `id` | INTEGER | Unique ID |
-| `name` | TEXT | Event name |
-| `channel_id` | TEXT | Discord channel ID |
-| `message` | TEXT | Message to send |
-| `next_run` | TEXT | Next execution (ISO 8601) |
-| `repeat_type` | TEXT | Repeat type |
-| `repeat_value` | INTEGER | Value for weekly/monthly |
-| `created_at` | TEXT | Creation timestamp |
-| `updated_at` | TEXT | Update timestamp |
+|-------|------|-------------|
+| `id` | Number | Unique ID (sequencial) |
+| `name` | String | Event name |
+| `channel_id` | String | Discord channel ID |
+| `message` | String | Message to send |
+| `next_run` | String | Next execution (ISO 8601) |
+| `repeat_type` | String | Repeat type |
+| `repeat_value` | Number | Value for weekly/monthly |
+| `enabled` | Boolean | Active/inactive |
+| `created_at` | String | Creation timestamp |
+| `updated_at` | String | Update timestamp |
 
 ---
 
@@ -204,6 +214,7 @@ The `events` table contains:
 ```env
 # Required
 DISCORD_TOKEN=your_token_here
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/eos-support
 
 # Optional
 PORT=3000                           # HTTP server port (default: 3000)
@@ -219,17 +230,12 @@ STATS_TOKEN=                        # Optional token for /stats endpoint
 
 ## 💾 Backups
 
-The bot automatically creates daily backups of the database:
-- **Location:** `./backups/` folder
-- **Naming:** `events-YYYY-MM-DD.db`
-- **Frequency:** Once per day (configurable via `BACKUP_INTERVAL_HOURS`)
-- **Automatic:** Backups start on bot startup and run on schedule
+O bot cria backups diários em JSON:
+- **Localização:** pasta `./backups/`
+- **Nome:** `events-YYYY-MM-DD.json`
+- **Frequência:** Uma vez por dia (configurável via `BACKUP_INTERVAL_HOURS`)
 
-To restore a backup:
-```bash
-cp backups/events-2026-01-21.db data/events.db
-npm start
-```
+Para restaurar um backup, importa o JSON manualmente na coleção `events` do MongoDB Atlas.
 
 ---
 
@@ -238,7 +244,7 @@ npm start
 ### "Bot doesn't respond to commands"
 1. Check if the bot has the `applications.commands` permission
 2. Try reloading Discord (CTRL+R)
-3. Check if DISCORD_TOKEN is correct in `.env` or no Render
+3. Check if DISCORD_TOKEN and MONGODB_URI are correct in `.env` or no Render
 
 ### "Messages are not being sent"
 1. Check if the bot has `Send Messages` permission in the channel
@@ -316,7 +322,7 @@ node --check logger.js
 node --check embeds.js
 node --check backup.js
 node --check rateLimit.js
-node --check data/database.js
+          node --check data/events.js
 ```
 
 ---
