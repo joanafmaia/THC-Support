@@ -61,7 +61,7 @@ export async function autocompleteEventId(interaction) {
 export async function handleEventComponent(interaction) {
   if (!canManage(interaction)) {
     return interaction.reply({
-      content: "❌ Precisas de **Gerir servidor** para usar estes controlos.",
+      content: "❌ You need **Manage Server** to use these controls.",
       flags: MessageFlags.Ephemeral,
     });
   }
@@ -73,7 +73,7 @@ export async function handleEventComponent(interaction) {
     const event = await getEventById(id);
     if (!event) {
       return interaction.update({
-        content: `❌ Evento #${id} já não existe.`,
+        content: `❌ Event #${id} no longer exists.`,
         embeds: [],
         components: [],
       });
@@ -93,14 +93,14 @@ export async function handleEventComponent(interaction) {
 
   const id = Number(rawId);
   if (!Number.isInteger(id)) {
-    return interaction.reply({ content: "❌ ID inválido.", flags: MessageFlags.Ephemeral });
+    return interaction.reply({ content: "❌ Invalid ID.", flags: MessageFlags.Ephemeral });
   }
 
   if (action === "toggle") {
     const event = await getEventById(id);
     if (!event) {
       return interaction.reply({
-        content: `❌ Evento #${id} não encontrado.`,
+        content: `❌ Event #${id} not found.`,
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -117,8 +117,8 @@ export async function handleEventComponent(interaction) {
     return interaction.update({
       embeds: [
         createSuccessEmbed(
-          next ? "Evento ativado" : "Evento desativado",
-          `Evento #${id} · **${event.name}**`
+          next ? "Event enabled" : "Event disabled",
+          `Event #${id} · **${event.name}**`
         ),
         createEventEmbed(refreshed),
       ],
@@ -130,7 +130,7 @@ export async function handleEventComponent(interaction) {
     const event = await getEventById(id);
     if (!event) {
       return interaction.reply({
-        content: `❌ Evento #${id} não encontrado.`,
+        content: `❌ Event #${id} not found.`,
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -144,12 +144,12 @@ export async function handleEventComponent(interaction) {
       });
       logger.info(`Event run via button: ${id}`, "event-ui");
       return interaction.reply({
-        embeds: [createSuccessEmbed("Evento enviado", `Evento #${id} foi enviado agora.`)],
+        embeds: [createSuccessEmbed("Event sent", `Event #${id} was sent just now.`)],
         flags: MessageFlags.Ephemeral,
       });
     } catch (error) {
       return interaction.reply({
-        embeds: [createErrorEmbed("Falha ao enviar", error.message)],
+        embeds: [createErrorEmbed("Failed to send", error.message)],
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -159,7 +159,7 @@ export async function handleEventComponent(interaction) {
     const event = await getEventById(id);
     if (!event) {
       return interaction.reply({
-        content: `❌ Evento #${id} não encontrado.`,
+        content: `❌ Event #${id} not found.`,
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -174,7 +174,7 @@ export async function handleEventComponent(interaction) {
     return interaction.update({
       content: null,
       embeds: [
-        createSuccessEmbed("Evento apagado", `Evento #${id} · **${event.name}** foi removido.`),
+        createSuccessEmbed("Event deleted", `Event #${id} · **${event.name}** was removed.`),
       ],
       components: [],
     });
@@ -186,7 +186,7 @@ export async function handleEventComponent(interaction) {
     return interaction.reply({
       embeds: [
         createHistoryEmbed(entries, {
-          title: `📜 Histórico · #${id} ${event?.name ?? ""}`.trim(),
+          title: `History · #${id} ${event?.name ?? ""}`.trim(),
         }),
       ],
       flags: MessageFlags.Ephemeral,
@@ -197,7 +197,7 @@ export async function handleEventComponent(interaction) {
     const event = await getEventById(id);
     if (!event) {
       return interaction.update({
-        content: `❌ Evento #${id} já não existe.`,
+        content: `❌ Event #${id} no longer exists.`,
         embeds: [],
         components: [],
       });
@@ -218,7 +218,7 @@ async function handleCreateFlow(interaction) {
     const draft = getCreateDraft(interaction.user.id, interaction.guildId);
     if (!draft) {
       return interaction.reply({
-        content: "⏳ O preview expirou. Corre `/event create` outra vez.",
+        content: "⏳ Preview expired. Run `/event create` again.",
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -232,7 +232,7 @@ async function handleCreateFlow(interaction) {
         embeds: [
           createErrorEmbed(
             "Missing permission",
-            "Precisas de **Mention Everyone** para usar `@everyone` / `@here`."
+            "You need **Mention Everyone** to use `@everyone` / `@here`."
           ),
         ],
         flags: MessageFlags.Ephemeral,
@@ -246,7 +246,7 @@ async function handleCreateFlow(interaction) {
         components: buildCreatePreviewComponents(updated),
       });
       return interaction.reply({
-        content: "✅ Mensagem atualizada no preview.",
+        content: "✅ Message updated in the preview.",
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -261,7 +261,7 @@ async function handleCreateFlow(interaction) {
     const draft = getCreateDraft(interaction.user.id, interaction.guildId);
     if (!draft) {
       return interaction.update({
-        content: "⏳ O preview expirou. Corre `/event create` outra vez.",
+        content: "⏳ Preview expired. Run `/event create` again.",
         embeds: [],
         components: [],
       });
@@ -270,7 +270,7 @@ async function handleCreateFlow(interaction) {
     const channel = interaction.channels.first();
     if (!channel?.isTextBased()) {
       return interaction.reply({
-        content: "❌ Escolhe um canal de texto.",
+        content: "❌ Pick a text channel.",
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -282,7 +282,7 @@ async function handleCreateFlow(interaction) {
         !botPermissions.has(PermissionFlagsBits.SendMessages))
     ) {
       return interaction.reply({
-        content: "❌ Não consigo ver/enviar mensagens nesse canal.",
+        content: "❌ I can't view/send messages in that channel.",
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -300,7 +300,7 @@ async function handleCreateFlow(interaction) {
     const draft = getCreateDraft(interaction.user.id, interaction.guildId);
     if (!draft) {
       return interaction.update({
-        content: "⏳ O preview expirou. Corre `/event create` outra vez.",
+        content: "⏳ Preview expired. Run `/event create` again.",
         embeds: [],
         components: [],
       });
@@ -312,8 +312,8 @@ async function handleCreateFlow(interaction) {
       return interaction.reply({
         embeds: [
           createErrorEmbed(
-            "repeat_value em falta",
-            `${error} Cancela e cria de novo com o valor certo, ou escolhe Diário / Uma vez.`
+            "Missing repeat_value",
+            `${error} Cancel and create again with the right value, or pick Daily / Once.`
           ),
         ],
         flags: MessageFlags.Ephemeral,
@@ -341,7 +341,7 @@ async function handleCreateFlow(interaction) {
     const draft = getCreateDraft(interaction.user.id, interaction.guildId);
     if (!draft) {
       return interaction.reply({
-        content: "⏳ O preview expirou. Corre `/event create` outra vez.",
+        content: "⏳ Preview expired. Run `/event create` again.",
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -353,7 +353,7 @@ async function handleCreateFlow(interaction) {
     return interaction.update({
       content: null,
       embeds: [
-        createSuccessEmbed("Criação cancelada", "O rascunho foi descartado. Nada foi gravado."),
+        createSuccessEmbed("Creation cancelled", "The draft was discarded. Nothing was saved."),
       ],
       components: [],
     });
@@ -363,7 +363,7 @@ async function handleCreateFlow(interaction) {
     const draft = getCreateDraft(interaction.user.id, interaction.guildId);
     if (!draft) {
       return interaction.update({
-        content: "⏳ O preview expirou. Corre `/event create` outra vez.",
+        content: "⏳ Preview expired. Run `/event create` again.",
         embeds: [],
         components: [],
       });
@@ -372,11 +372,11 @@ async function handleCreateFlow(interaction) {
     try {
       const channel = await interaction.client.channels.fetch(draft.channelId);
       if (!channel?.isTextBased()) {
-        throw new Error("Canal inválido");
+        throw new Error("Invalid channel");
       }
     } catch {
       return interaction.reply({
-        content: "❌ Canal inválido. Escolhe outro no menu.",
+        content: "❌ Invalid channel. Pick another from the menu.",
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -404,8 +404,8 @@ async function handleCreateFlow(interaction) {
       content: null,
       embeds: [
         createSuccessEmbed(
-          "Evento criado",
-          `**ID:** #${id}\n**Nome:** ${draft.name}\n**Canal:** <#${draft.channelId}>\n**Próxima execução:** ${formatUtc(draft.nextRun)}\n**Repetição:** ${draft.repeat}${draft.repeatValue != null ? ` (${draft.repeatValue})` : ""}`
+          "Event created",
+          `**ID:** #${id}\n**Name:** ${draft.name}\n**Channel:** <#${draft.channelId}>\n**Next run:** ${formatUtc(draft.nextRun)}\n**Repeat:** ${draft.repeat}${draft.repeatValue != null ? ` (${draft.repeatValue})` : ""}`
         ),
       ],
       components: [],

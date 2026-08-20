@@ -14,41 +14,54 @@ export default {
 
     let active = 0;
     let total = 0;
-    let nextLine = "Nenhum evento ativo";
+    let nextLine = "_No active events_";
 
     try {
       ({ active, total } = await countEvents());
       const next = await getNextEvent();
       if (next) {
-        nextLine = `**#${next.id} ${next.name}** · ${relativeTime(next.next_run)}`;
+        nextLine = `**#${next.id} ${next.name}**\n${relativeTime(next.next_run)}`;
       }
     } catch (error) {
-      nextLine = `⚠️ Base de dados: ${error.message}`;
+      nextLine = `⚠️ Database: ${error.message}`;
     }
 
     const roundTrip = Date.now() - started;
+    const avatar = interaction.client.user?.displayAvatarURL({ size: 128 });
+
     const embed = new EmbedBuilder()
-      .setTitle("🐻 THC Support")
+      .setAuthor({
+        name: "THC Support",
+        iconURL: avatar,
+      })
+      .setTitle("Online")
       .setColor(CONFIG.EMBED_COLOR)
-      .setDescription("Bot online e a responder.")
+      .setThumbnail(avatar ?? null)
+      .setDescription("Bot is online and responding.")
       .addFields(
         {
-          name: "📡 Latência",
-          value: `WS **${interaction.client.ws.ping}ms** · round-trip **${roundTrip}ms** · age **${age}ms**`,
-          inline: false,
-        },
-        {
-          name: "📅 Agenda",
-          value: `**${active}** ativos · **${total}** no total`,
+          name: "Latency",
+          value: [
+            `WebSocket **${interaction.client.ws.ping}ms**`,
+            `Round-trip **${roundTrip}ms**`,
+            `Interaction age **${age}ms**`,
+          ].join("\n"),
           inline: true,
         },
         {
-          name: "⏭️ Próximo",
+          name: "Schedule",
+          value: `**${active}** active\n**${total}** total`,
+          inline: true,
+        },
+        {
+          name: "Next up",
           value: nextLine,
           inline: false,
         }
       )
-      .setFooter({ text: `instance ${instanceId ?? "?"} · uptime ${formatUptime(process.uptime())}` })
+      .setFooter({
+        text: `instance ${instanceId ?? "?"} · uptime ${formatUptime(process.uptime())}`,
+      })
       .setTimestamp();
 
     await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });

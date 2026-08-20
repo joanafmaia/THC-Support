@@ -543,10 +543,10 @@ export default {
         return answer(interaction, {
           embeds: [
             createInfoEmbed(
-              showAll ? "Sem eventos" : "Sem eventos ativos",
+              showAll ? "No events" : "No active events",
               showAll
-                ? "Ainda não existem eventos."
-                : "Não há eventos ativos. Usa `/event list all:True` para ver os desativados."
+                ? "No events exist yet."
+                : "No active events. Use `/event list all:True` to include disabled ones."
             ),
           ],
         });
@@ -556,7 +556,7 @@ export default {
       return answer(interaction, {
         embeds: [
           createEventListEmbed(rows, {
-            title: showAll ? "📅 Todos os eventos" : "📅 Eventos ativos",
+            title: showAll ? "All events" : "Active events",
           }),
         ],
         components: select ? [select] : [],
@@ -576,7 +576,7 @@ export default {
         return answer(interaction, {
           embeds: [
             createHistoryEmbed(entries, {
-              title: `📜 Histórico · #${id} ${event.name}`,
+              title: `History · #${id} ${event.name}`,
             }),
           ],
         });
@@ -647,12 +647,12 @@ export default {
         "`/event enable id:<id>` / `/event disable id:<id>` / `/event delete id:<id>`",
         "",
         "**Inspect**",
-        "`/event list` — só ativos (usa `all:True` para ver todos)",
+        "`/event list` — active only (use `all:True` to see all)",
         "`/event next` / `/event due` / `/event history [id]`",
         "`/event preview id:<id>` / `/event preview all:true`",
         "",
         "**Tip**",
-        "No `/event list`, escolhe um evento no menu para Ativar, Correr, Apagar ou ver Histórico.",
+        "In `/event list`, pick an event from the menu to Enable, Run, Delete, or view History.",
         "",
         "**Repeat values**",
         "`weekly repeat_value`: 0-6 (Sun-Sat)",

@@ -207,12 +207,12 @@ client.on("interactionCreate", async (interaction) => {
       try {
         if (interaction.isModalSubmit()) {
           await interaction.reply({
-            content: "⏳ Discord ainda está a limitar pedidos. Espera um pouco.",
+            content: "⏳ Discord is still rate-limiting requests. Please wait a moment.",
             flags: MessageFlags.Ephemeral,
           });
         } else {
           await interaction.reply({
-            content: "⏳ Discord ainda está a limitar pedidos. Espera um pouco.",
+            content: "⏳ Discord is still rate-limiting requests. Please wait a moment.",
             flags: MessageFlags.Ephemeral,
           });
         }
@@ -277,8 +277,8 @@ client.on("interactionCreate", async (interaction) => {
       await withTimeout(
         interaction.reply({
           content:
-            `⏳ O Discord está a limitar temporariamente este bot (~${waitSec}s). ` +
-            "Não uses mais comandos até passar — cada tentativa atrasa a recuperação.",
+            `⏳ Discord is temporarily limiting this bot (~${waitSec}s). ` +
+            "Do not use more commands until it clears — each attempt delays recovery.",
           flags: MessageFlags.Ephemeral,
         }),
         3000,

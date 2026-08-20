@@ -22,7 +22,7 @@ export const CONFIG = {
 
   // Discord Message
   MAX_MESSAGE_LENGTH: 2000,
-  EMBED_COLOR: 0x5865F2, // Discord Blurple
+  EMBED_COLOR: 0x00A651, // Hulk green
 
   // Logging
   LOG_LEVEL: process.env.LOG_LEVEL || "info",

@@ -162,5 +162,5 @@ async function sendEventMessage(client, event, now) {
 }
 
 export function formatEvent(event) {
-  return `📅 **${event.name}** | 🔗 <#${event.channel_id}> | ⏰ ${event.next_run} | 🔄 ${event.repeat_type}${event.repeat_value != null ? ` (${event.repeat_value})` : ""}`;
+  return `**${event.name}** | <#${event.channel_id}> | ${event.next_run} | ${event.repeat_type}${event.repeat_value != null ? ` (${event.repeat_value})` : ""}`;
 }
