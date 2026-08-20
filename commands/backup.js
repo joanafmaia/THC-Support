@@ -1,7 +1,7 @@
 import { SlashCommandBuilder, PermissionFlagsBits } from "discord.js";
 import { backupDatabase, getBackupStatus } from "../backup.js";
 import { formatUtc } from "../embeds.js";
-import { answer, deferIfNeeded } from "../lib/respond.js";
+import { answer } from "../lib/respond.js";
 
 export default {
   data: new SlashCommandBuilder()
@@ -20,7 +20,6 @@ export default {
     const sub = interaction.options.getSubcommand();
 
     if (sub === "now") {
-      await deferIfNeeded(interaction);
       const { eventCount } = await backupDatabase();
       return answer(
         interaction,

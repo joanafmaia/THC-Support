@@ -29,7 +29,7 @@ import {
   isValidRepeat,
   validateRepeatValue,
 } from "../lib/schedule.js";
-import { answer, deferIfNeeded } from "../lib/respond.js";
+import { answer } from "../lib/respond.js";
 
 async function sendToChannel(client, channelId, content) {
   const channel = await client.channels.fetch(channelId);
@@ -262,7 +262,6 @@ export default {
     const client = interaction.client;
 
     if (sub === "create") {
-      await deferIfNeeded(interaction);
       const name = interaction.options.getString("name", true);
       const message = interaction.options.getString("message", true);
       const hour = interaction.options.getInteger("hour", true);
@@ -363,7 +362,6 @@ export default {
     }
 
     if (sub === "edit") {
-      await deferIfNeeded(interaction);
       const id = interaction.options.getInteger("id", true);
       const existing = await getEventById(id);
       if (!existing) {
@@ -645,7 +643,6 @@ export default {
     }
 
     if (sub === "run") {
-      await deferIfNeeded(interaction);
       const id = interaction.options.getInteger("id", true);
       const ev = await getEventById(id);
       if (!ev) {
