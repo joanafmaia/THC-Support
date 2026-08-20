@@ -1,13 +1,14 @@
-import { SlashCommandBuilder, PermissionFlagsBits } from "discord.js";
+import { SlashCommandBuilder } from "discord.js";
 import { backupDatabase, getBackupStatus } from "../backup.js";
-import { formatUtc } from "../embeds.js";
+import { createErrorEmbed, formatUtc } from "../embeds.js";
 import { answer } from "../lib/respond.js";
+import { memberCanUseBot, deniedBotAccessEmbed } from "../lib/permissions.js";
 
 export default {
   data: new SlashCommandBuilder()
     .setName("backup")
     .setDescription("Manage database backups")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDefaultMemberPermissions(null)
     .setDMPermission(false)
     .addSubcommand((sc) =>
       sc.setName("now").setDescription("Create a database backup now")
@@ -17,6 +18,13 @@ export default {
     ),
 
   async execute(interaction) {
+    if (!memberCanUseBot(interaction)) {
+      const denied = deniedBotAccessEmbed();
+      return answer(interaction, {
+        embeds: [createErrorEmbed(denied.title, denied.description)],
+      });
+    }
+
     const sub = interaction.options.getSubcommand();
 
     if (sub === "now") {

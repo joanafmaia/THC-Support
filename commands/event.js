@@ -20,6 +20,7 @@ import {
 } from "../lib/schedule.js";
 import { answer } from "../lib/respond.js";
 import { buildEventSelectMenu, buildCreateSetupModal } from "../lib/components.js";
+import { memberCanUseBot, deniedBotAccessEmbed } from "../lib/permissions.js";
 import { autocompleteEventId, handleEventComponent } from "./eventUi.js";
 
 function idOption(option, { required = true, description = "Event ID" } = {}) {
@@ -54,8 +55,8 @@ export default {
   data: new SlashCommandBuilder()
     .setName("event")
     .setDescription("Create and manage scheduled events (UTC)")
-    // Events make the bot post to any channel, so keep this to server managers.
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    // Visibility is open; R4/R5 (or Administrator) are enforced in execute.
+    .setDefaultMemberPermissions(null)
     .setDMPermission(false)
 
     .addSubcommand((sc) =>
@@ -139,6 +140,13 @@ export default {
   autocomplete: autocompleteEventId,
   handleComponent: handleEventComponent,
   async execute(interaction, { instanceId } = {}) {
+    if (!memberCanUseBot(interaction)) {
+      const denied = deniedBotAccessEmbed();
+      return answer(interaction, {
+        embeds: [createErrorEmbed(denied.title, denied.description)],
+      });
+    }
+
     const sub = interaction.options.getSubcommand();
     const client = interaction.client;
     const buildTag = `build ${CONFIG.BUILD} · ${instanceId ?? "?"}`;

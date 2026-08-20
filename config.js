@@ -41,6 +41,17 @@ export const CONFIG = {
 
   // Stats protection (optional)
   STATS_TOKEN: process.env.STATS_TOKEN || "",
+
+  // Staff roles that may use /event and /backup (names, case-insensitive).
+  // Override with ALLOWED_ROLE_NAMES=R4,R5 and/or ALLOWED_ROLE_IDS=id1,id2
+  ALLOWED_ROLE_NAMES: (process.env.ALLOWED_ROLE_NAMES || "R4,R5")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+  ALLOWED_ROLE_IDS: (process.env.ALLOWED_ROLE_IDS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
 };
 
 export default CONFIG;

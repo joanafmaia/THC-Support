@@ -36,6 +36,7 @@ import {
   localCalendarParts,
 } from "../lib/schedule.js";
 import { PermissionFlagsBits, MessageFlags } from "discord.js";
+import { memberCanUseBot, deniedBotAccessEmbed } from "../lib/permissions.js";
 
 async function sendToChannel(client, channelId, content) {
   const channel = await client.channels.fetch(channelId);
@@ -43,11 +44,11 @@ async function sendToChannel(client, channelId, content) {
   await channel.send(content);
 }
 
-function canManage(interaction) {
-  return interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild);
-}
-
 export async function autocompleteEventId(interaction) {
+  if (!memberCanUseBot(interaction)) {
+    return interaction.respond([]);
+  }
+
   const focused = interaction.options.getFocused(true);
   if (focused.name !== "id") {
     return interaction.respond([]);
@@ -66,9 +67,10 @@ export async function autocompleteEventId(interaction) {
 }
 
 export async function handleEventComponent(interaction) {
-  if (!canManage(interaction)) {
+  if (!memberCanUseBot(interaction)) {
+    const denied = deniedBotAccessEmbed();
     return interaction.reply({
-      content: "❌ You need **Manage Server** to use these controls.",
+      embeds: [createErrorEmbed(denied.title, denied.description)],
       flags: MessageFlags.Ephemeral,
     });
   }
