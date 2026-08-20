@@ -45,6 +45,15 @@ function isUnrecoverableInteractionError(error) {
   return UNRECOVERABLE_INTERACTION_CODES.has(error?.code);
 }
 
+/** Rejects instead of hanging forever when Discord or MongoDB never answers. */
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 function normalizePayload(payload) {
   if (payload == null || typeof payload === "string") {
     return { content: String(payload ?? "") };
@@ -104,7 +113,7 @@ client.commands.set(eventCommand.data.name, eventCommand);
 client.commands.set(backupCommand.data.name, backupCommand);
 
 const app = express();
-app.get("/", (req, res) => res.send("✅ EOS Support Bot is running!"));
+app.get("/", (req, res) => res.send("✅ THC Support Bot is running!"));
 app.get("/health", (req, res) => res.json({ status: "ok", uptime: process.uptime() }));
 
 app.get("/stats", async (req, res) => {
@@ -132,7 +141,7 @@ app.get("/stats", async (req, res) => {
   }
 });
 
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   logger.info(`Bot ready! (${new Date().toISOString()})`);
   logger.info(`Instance ${INSTANCE_ID} — application ${client.application?.id}`, "startup");
 
@@ -160,8 +169,11 @@ client.on("interactionCreate", async (interaction) => {
   // is a different problem from another instance acknowledging it first.
   const age = Date.now() - interaction.createdTimestamp;
 
+  const sub = interaction.options.getSubcommand(false);
+  const label = `/${interaction.commandName}${sub ? ` ${sub}` : ""}`;
+
   logger.info(
-    `Received /${interaction.commandName} from ${interaction.user.tag} ` +
+    `Received ${label} from ${interaction.user.tag} ` +
       `(instance=${INSTANCE_ID}, age=${age}ms, guild=${interaction.guildId ?? "DM"})`,
     "interactionCreate"
   );
@@ -192,11 +204,16 @@ client.on("interactionCreate", async (interaction) => {
   // /ping replies once itself — skip defer for that.
   if (interaction.commandName !== "ping") {
     try {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await withTimeout(
+        interaction.deferReply({ flags: MessageFlags.Ephemeral }),
+        2500,
+        "deferReply"
+      );
+      logger.debug(`Acknowledged ${label} after ${Date.now() - interaction.createdTimestamp}ms`, "interactionCreate");
     } catch (error) {
       if (isUnrecoverableInteractionError(error)) {
         logger.warn(
-          `Could not acknowledge /${interaction.commandName} (${error.code}): ${error.message}. ` +
+          `Could not acknowledge ${label} (${error.code}): ${error.message}. ` +
             `Interaction was ${Date.now() - interaction.createdTimestamp}ms old at failure ` +
             `(instance=${INSTANCE_ID}).`,
           "interactionCreate"
@@ -204,7 +221,7 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
       logger.error(
-        `Failed to defer /${interaction.commandName}: ${error?.message || error} (code=${error?.code ?? "?"})`,
+        `Failed to defer ${label}: ${error?.message || error} (code=${error?.code ?? "?"})`,
         "interactionCreate"
       );
       return;
@@ -228,13 +245,14 @@ client.on("interactionCreate", async (interaction) => {
     };
   }
 
+  const startedAt = Date.now();
   try {
-    await cmd.execute(interaction, { instanceId: INSTANCE_ID });
-    logger.info(`Finished /${interaction.commandName} (instance=${INSTANCE_ID})`, "interactionCreate");
+    await withTimeout(cmd.execute(interaction, { instanceId: INSTANCE_ID }), 20_000, label);
+    logger.info(`Finished ${label} in ${Date.now() - startedAt}ms`, "interactionCreate");
   } catch (err) {
     if (isUnrecoverableInteractionError(err)) {
       logger.warn(
-        `Command /${interaction.commandName} aborted (${err.code}): ${err.message}`,
+        `Command ${label} aborted (${err.code}): ${err.message}`,
         "interactionCreate"
       );
       await respondToInteraction(interaction, {
@@ -243,7 +261,7 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
     logger.error(
-      `Command /${interaction.commandName} error: ${err?.message || err}`,
+      `Command ${label} error after ${Date.now() - startedAt}ms: ${err?.message || err}`,
       "interactionCreate"
     );
     await respondToInteraction(interaction, {
