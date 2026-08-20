@@ -207,15 +207,6 @@ describe("parseStartDateInput / resolveFirstRun", () => {
     assert.equal(parseStartDateInput("  ", { hour: 20, minute: 0 }), null);
   });
 
-  it("accepts +N calendar days from today UTC", () => {
-    const run = parseStartDateInput("+4", {
-      hour: 20,
-      minute: 30,
-      now: at("2026-08-20T10:00:00Z"),
-    });
-    assert.equal(run, "2026-08-24T20:30:00.000Z");
-  });
-
   it("accepts an absolute YYYY-MM-DD date", () => {
     const run = parseStartDateInput("2026-08-25", {
       hour: 12,
@@ -223,6 +214,15 @@ describe("parseStartDateInput / resolveFirstRun", () => {
       now: at("2026-08-20T10:00:00Z"),
     });
     assert.equal(run, "2026-08-25T12:00:00.000Z");
+  });
+
+  it("rejects +N relative days", () => {
+    const err = parseStartDateInput("+4", {
+      hour: 20,
+      minute: 30,
+      now: at("2026-08-20T10:00:00Z"),
+    });
+    assert.match(err, /YYYY-MM-DD/);
   });
 
   it("rejects a start in the past", () => {
@@ -238,7 +238,7 @@ describe("parseStartDateInput / resolveFirstRun", () => {
     const run = resolveFirstRun({
       hour: 20,
       minute: 0,
-      startDateInput: "+4",
+      startDateInput: "2026-08-24",
       repeatType: "daily",
       now: at("2026-08-20T10:00:00Z"),
     });
