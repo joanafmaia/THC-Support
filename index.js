@@ -13,6 +13,7 @@ import { startBackupSchedule, stopBackupSchedule } from "./backup.js";
 import { isOnCooldown, addCooldown, getRemainingCooldown } from "./rateLimit.js";
 import { connectDatabase, closeDatabase, startDatabaseHeartbeat } from "./data/database.js";
 import { countEvents } from "./data/events.js";
+import { answer } from "./lib/respond.js";
 
 const TOKEN = CONFIG.DISCORD_TOKEN;
 const PORT = CONFIG.PORT;
@@ -35,7 +36,9 @@ if (!CONFIG.MONGODB_URI) {
 // so requests are kept short and retried at most once.
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
-  rest: { timeout: 8_000, retries: 1, invalidRequestWarningInterval: 1 },
+  // Zero retries: a 4xx must fail immediately so we see the real Discord code
+  // instead of hanging until our command timeout while counting as invalid.
+  rest: { timeout: 8_000, retries: 0, invalidRequestWarningInterval: 1 },
 });
 
 // A request can also sit in the rate-limit queue, where the timeout above does
@@ -78,14 +81,6 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-function normalizePayload(payload) {
-  if (payload == null || typeof payload === "string") {
-    return { content: String(payload ?? "") };
-  }
-  const { flags: _flags, ...rest } = payload;
-  return rest;
-}
-
 /** Discord flags the IP after too many 4xx responses; further calls just dig deeper. */
 let discordInvalidWindowEndsAt = 0;
 
@@ -104,69 +99,25 @@ function isTimeoutError(error) {
   return /timed out after \d+ms/i.test(String(error?.message || error));
 }
 
-/**
- * Commands answer with editReply after the defer. Retries are avoided when Discord
- * is already rejecting requests — each retry counts toward the IP block window.
- */
-function installEditReplyFallback(interaction, label) {
-  const editReply = interaction.editReply.bind(interaction);
-
-  interaction.editReply = async (payload) => {
-    const body = normalizePayload(payload);
-    logger.info(`Sending response for ${label}`, "interactionCreate");
-
-    if (discordApiIsCoolingDown()) {
-      const waitSec = Math.ceil((discordInvalidWindowEndsAt - Date.now()) / 1000);
-      throw new Error(
-        `Discord is cooling down invalid requests for ~${waitSec}s more — not sending another request`
-      );
-    }
-
-    try {
-      return await withTimeout(editReply(body), 6000, `editReply for ${label}`);
-    } catch (error) {
-      // Timeouts and cool-downs mean Discord is already unhappy; a followUp would
-      // add another invalid request and prolong the block.
-      if (isTimeoutError(error) || discordApiIsCoolingDown() || isUnrecoverableInteractionError(error)) {
-        throw error;
-      }
-      logger.warn(
-        `editReply failed (${error?.code ?? "?"}): ${error?.message || error}. Trying followUp…`,
-        "interactionCreate"
-      );
-      return withTimeout(
-        interaction.followUp({ ...body, flags: MessageFlags.Ephemeral }),
-        6000,
-        `followUp for ${label}`
-      );
-    }
-  };
+function describeDiscordError(error) {
+  const parts = [
+    error?.message || String(error),
+    error?.code != null ? `code=${error.code}` : null,
+    error?.status != null ? `status=${error.status}` : null,
+  ].filter(Boolean);
+  return parts.join(" ");
 }
 
-/** Answers the interaction whether or not it was already acknowledged. */
+/** Answers the interaction; prefers reply (works) over webhook edit (was failing). */
 async function respondToInteraction(interaction, payload) {
-  const body = normalizePayload(payload);
-
   try {
-    if (!interaction.deferred && !interaction.replied) {
-      await interaction.reply({ ...body, flags: MessageFlags.Ephemeral });
-      return;
-    }
-
-    // editReply already falls back to followUp for deferred interactions.
-    await interaction.editReply(body);
+    await withTimeout(answer(interaction, payload), 6000, "respond");
   } catch (error) {
-    if (isUnrecoverableInteractionError(error)) {
-      logger.warn(
-        `Interaction response skipped (${error.code}): ${error.message}`,
-        "interactionCreate"
-      );
+    if (isUnrecoverableInteractionError(error) || isTimeoutError(error) || discordApiIsCoolingDown()) {
+      logger.warn(`Interaction response skipped: ${describeDiscordError(error)}`, "interactionCreate");
       return;
     }
-    logger.warn(
-      `Interaction response failed: ${error?.message || error} (code=${error?.code ?? "?"})`,
-      "interactionCreate"
-    );
+    logger.warn(`Interaction response failed: ${describeDiscordError(error)}`, "interactionCreate");
   }
 }
 
@@ -296,50 +247,21 @@ client.on("interactionCreate", async (interaction) => {
     return respondToInteraction(interaction, { content: "❌ Unknown command." });
   }
 
-  // Acknowledge quickly for commands that will use editReply.
-  // /ping replies once itself — skip defer for that.
-  if (interaction.commandName !== "ping") {
-    try {
-      await withTimeout(
-        interaction.deferReply({ flags: MessageFlags.Ephemeral }),
-        2500,
-        "deferReply"
-      );
-      logger.debug(`Acknowledged ${label} after ${Date.now() - interaction.createdTimestamp}ms`, "interactionCreate");
-    } catch (error) {
-      if (isUnrecoverableInteractionError(error)) {
-        logger.warn(
-          `Could not acknowledge ${label} (${error.code}): ${error.message}. ` +
-            `Interaction was ${Date.now() - interaction.createdTimestamp}ms old at failure ` +
-            `(instance=${INSTANCE_ID}).`,
-          "interactionCreate"
-        );
-        return;
-      }
-      logger.error(
-        `Failed to defer ${label}: ${error?.message || error} (code=${error?.code ?? "?"})`,
-        "interactionCreate"
-      );
-      return;
-    }
-
-    installEditReplyFallback(interaction, label);
-  }
-
   const startedAt = Date.now();
   try {
+    logger.info(`Executing ${label}`, "interactionCreate");
     await withTimeout(cmd.execute(interaction, { instanceId: INSTANCE_ID }), 20_000, label);
     logger.info(`Finished ${label} in ${Date.now() - startedAt}ms`, "interactionCreate");
   } catch (err) {
     if (isUnrecoverableInteractionError(err) || isTimeoutError(err) || discordApiIsCoolingDown()) {
       logger.warn(
-        `Command ${label} aborted without retry: ${err?.message || err}`,
+        `Command ${label} aborted without retry: ${describeDiscordError(err)}`,
         "interactionCreate"
       );
       return;
     }
     logger.error(
-      `Command ${label} error after ${Date.now() - startedAt}ms: ${err?.message || err}`,
+      `Command ${label} error after ${Date.now() - startedAt}ms: ${describeDiscordError(err)}`,
       "interactionCreate"
     );
     await respondToInteraction(interaction, {

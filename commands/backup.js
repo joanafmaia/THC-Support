@@ -1,6 +1,7 @@
 import { SlashCommandBuilder, PermissionFlagsBits } from "discord.js";
 import { backupDatabase, getBackupStatus } from "../backup.js";
 import { formatUtc } from "../embeds.js";
+import { answer, deferIfNeeded } from "../lib/respond.js";
 
 export default {
   data: new SlashCommandBuilder()
@@ -17,11 +18,12 @@ export default {
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
-    // Reply is deferred in index.js (must stay within Discord's 3s window).
 
     if (sub === "now") {
+      await deferIfNeeded(interaction);
       const { eventCount } = await backupDatabase();
-      return interaction.editReply(
+      return answer(
+        interaction,
         `✅ Backup created with **${eventCount}** event(s), stored in MongoDB.`
       );
     }
@@ -30,7 +32,7 @@ export default {
       const status = await getBackupStatus();
 
       if (!status.latestStoredAt) {
-        return interaction.editReply("ℹ️ No backup has been created yet.");
+        return answer(interaction, "ℹ️ No backup has been created yet.");
       }
 
       const lines = [
@@ -42,9 +44,9 @@ export default {
           : "✅ Last backup completed successfully.",
       ];
 
-      return interaction.editReply(lines.join("\n"));
+      return answer(interaction, lines.join("\n"));
     }
 
-    return interaction.editReply("❌ Unknown subcommand.");
+    return answer(interaction, "❌ Unknown subcommand.");
   },
 };

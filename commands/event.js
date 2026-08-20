@@ -29,6 +29,7 @@ import {
   isValidRepeat,
   validateRepeatValue,
 } from "../lib/schedule.js";
+import { answer, deferIfNeeded } from "../lib/respond.js";
 
 async function sendToChannel(client, channelId, content) {
   const channel = await client.channels.fetch(channelId);
@@ -258,11 +259,10 @@ export default {
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
-    // Reply is deferred in index.js (must stay within Discord's 3s window).
-
     const client = interaction.client;
 
     if (sub === "create") {
+      await deferIfNeeded(interaction);
       const name = interaction.options.getString("name", true);
       const message = interaction.options.getString("message", true);
       const hour = interaction.options.getInteger("hour", true);
@@ -274,13 +274,13 @@ export default {
 
       // Validate message length
       if (message.length > 2000) {
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [createErrorEmbed("Message too long", "Maximum length is 2000 characters.")],
         });
       }
 
       if (missingMentionPermission(interaction, message)) {
-        return interaction.editReply({ embeds: [MENTION_PERMISSION_ERROR] });
+        return answer(interaction, { embeds: [MENTION_PERMISSION_ERROR] });
       }
 
       // Validate channel exists
@@ -288,33 +288,33 @@ export default {
         const channel = await client.channels.fetch(channelId);
         if (!channel || !channel.isTextBased()) {
           logger.warn(`Invalid channel ID: ${channelId}`, "event-command");
-          return interaction.editReply({
+          return answer(interaction, {
             embeds: [createErrorEmbed("Channel not found", "Please provide a valid text channel ID.")],
           });
         }
         const botPermissions = channel.permissionsFor(interaction.guild?.members.me);
         if (botPermissions) {
           if (!botPermissions.has(PermissionFlagsBits.ViewChannel)) {
-            return interaction.editReply({
+            return answer(interaction, {
               embeds: [createErrorEmbed("Missing permission", "I can't view that channel.")],
             });
           }
           if (!botPermissions.has(PermissionFlagsBits.SendMessages)) {
-            return interaction.editReply({
+            return answer(interaction, {
               embeds: [createErrorEmbed("Missing permission", "I can't send messages in that channel.")],
             });
           }
         }
       } catch (error) {
         logger.warn(`Failed to fetch channel ${channelId}: ${error.message}`, "event-command");
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [createErrorEmbed("Invalid channel", "Channel lookup failed. Check the channel ID.")],
         });
       }
 
       if (!isValidRepeat(repeat)) {
         logger.warn(`Invalid repeat type: ${repeat}`, "event-command");
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [
             createErrorEmbed(
               "Invalid repeat type",
@@ -326,7 +326,7 @@ export default {
 
       const repeatValueError = validateRepeatValue(repeat, repeatValue);
       if (repeatValueError) {
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [createErrorEmbed("Invalid repeat value", repeatValueError)],
         });
       }
@@ -350,7 +350,7 @@ export default {
       });
 
       logger.info(`Event created: ${name} (ID: ${id})`, "event-command");
-      return interaction.editReply({
+      return answer(interaction, {
         embeds: [
           createSuccessEmbed(
             "Event created",
@@ -363,10 +363,11 @@ export default {
     }
 
     if (sub === "edit") {
+      await deferIfNeeded(interaction);
       const id = interaction.options.getInteger("id", true);
       const existing = await getEventById(id);
       if (!existing) {
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [createErrorEmbed("Event not found", `No event exists with ID #${id}.`)],
         });
       }
@@ -383,13 +384,13 @@ export default {
       const channelId = interaction.options.getString("channel_id", false) ?? existing.channel_id;
 
       if ((hourOption != null || minuteOption != null) && (hourOption == null || minuteOption == null)) {
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [createErrorEmbed("Invalid time update", "Provide both hour and minute.")],
         });
       }
 
       if (timezoneOffset != null && hourOption == null && minuteOption == null) {
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [
             createErrorEmbed(
               "Invalid timezone offset",
@@ -400,17 +401,17 @@ export default {
       }
 
       if (message.length > 2000) {
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [createErrorEmbed("Message too long", "Maximum length is 2000 characters.")],
         });
       }
 
       if (missingMentionPermission(interaction, message)) {
-        return interaction.editReply({ embeds: [MENTION_PERMISSION_ERROR] });
+        return answer(interaction, { embeds: [MENTION_PERMISSION_ERROR] });
       }
 
       if (!isValidRepeat(repeat)) {
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [
             createErrorEmbed(
               "Invalid repeat type",
@@ -429,7 +430,7 @@ export default {
       if (shouldRecalculate) {
         const repeatValueError = validateRepeatValue(repeat, repeatValue);
         if (repeatValueError) {
-          return interaction.editReply({
+          return answer(interaction, {
             embeds: [createErrorEmbed("Invalid repeat value", repeatValueError)],
           });
         }
@@ -440,26 +441,26 @@ export default {
         const channel = await client.channels.fetch(channelId);
         if (!channel || !channel.isTextBased()) {
           logger.warn(`Invalid channel ID: ${channelId}`, "event-command");
-          return interaction.editReply({
+          return answer(interaction, {
             embeds: [createErrorEmbed("Channel not found", "Please provide a valid text channel ID.")],
           });
         }
         const botPermissions = channel.permissionsFor(interaction.guild?.members.me);
         if (botPermissions) {
           if (!botPermissions.has(PermissionFlagsBits.ViewChannel)) {
-            return interaction.editReply({
+            return answer(interaction, {
               embeds: [createErrorEmbed("Missing permission", "I can't view that channel.")],
             });
           }
           if (!botPermissions.has(PermissionFlagsBits.SendMessages)) {
-            return interaction.editReply({
+            return answer(interaction, {
               embeds: [createErrorEmbed("Missing permission", "I can't send messages in that channel.")],
             });
           }
         }
       } catch (error) {
         logger.warn(`Failed to fetch channel ${channelId}: ${error.message}`, "event-command");
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [createErrorEmbed("Invalid channel", "Channel lookup failed. Check the channel ID.")],
         });
       }
@@ -495,7 +496,7 @@ export default {
 
       logger.info(`Event updated: ${name} (ID: ${id})`, "event-command");
       const refreshed = await getEventById(id);
-      return interaction.editReply({
+      return answer(interaction, {
         embeds: [
           createSuccessEmbed(
             "Event updated",
@@ -509,23 +510,23 @@ export default {
     if (sub === "next") {
       const next = await getNextEvent();
       if (!next) {
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [createInfoEmbed("No scheduled events", "There are no upcoming events.")],
         });
       }
-      return interaction.editReply({ embeds: [createEventEmbed(next)] });
+      return answer(interaction, { embeds: [createEventEmbed(next)] });
     }
 
     if (sub === "list") {
       const rows = await listEvents();
 
       if (!rows.length) {
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [createInfoEmbed("No events found", "No scheduled events exist yet.")],
         });
       }
 
-      return interaction.editReply({ embeds: [createEventListEmbed(rows)] });
+      return answer(interaction, { embeds: [createEventListEmbed(rows)] });
     }
 
     if (sub === "preview") {
@@ -533,13 +534,13 @@ export default {
       const all = interaction.options.getBoolean("all", false) ?? false;
 
       if (all && id != null) {
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [createErrorEmbed("Invalid usage", "Use either all:true or id:<eventId>, not both.")],
         });
       }
 
       if (!all && id == null) {
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [
             createErrorEmbed(
               "Missing option",
@@ -553,23 +554,23 @@ export default {
         const rows = await listEventsForPreview();
 
         if (!rows.length) {
-          return interaction.editReply({
+          return answer(interaction, {
             embeds: [createInfoEmbed("No events found", "No scheduled events exist yet.")],
           });
         }
 
-        return interaction.editReply({ embeds: [createEventPreviewListEmbed(rows)] });
+        return answer(interaction, { embeds: [createEventPreviewListEmbed(rows)] });
       }
 
       const event = await getEventForPreview(id);
 
       if (!event) {
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [createErrorEmbed("Event not found", `No event exists with ID #${id}.`)],
         });
       }
 
-      return interaction.editReply({ embeds: [createEventPreviewEmbed(event)] });
+      return answer(interaction, { embeds: [createEventPreviewEmbed(event)] });
     }
 
     if (sub === "help") {
@@ -595,7 +596,7 @@ export default {
         "`monthly repeat_value`: 1-31",
       ].join("\n");
 
-      return interaction.editReply({
+      return answer(interaction, {
         embeds: [createInfoEmbed("Event command help", helpText)],
       });
     }
@@ -603,12 +604,12 @@ export default {
     if (sub === "due") {
       const due = await getDueEvents(new Date().toISOString());
       if (!due.length) {
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [createInfoEmbed("Nothing due", "No events are due right now.")],
         });
       }
       const lines = due.map((e) => `#${e.id} ${e.name} — ${formatUtc(e.next_run)}`).join("\n");
-      return interaction.editReply({
+      return answer(interaction, {
         embeds: [createInfoEmbed("⏱ Due events", lines)],
       });
     }
@@ -618,12 +619,12 @@ export default {
       const enabled = await setEventEnabled(id, true);
       if (!enabled) {
         logger.warn(`Event not found: ${id}`, "event-command");
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [createErrorEmbed("Event not found", `No event exists with ID #${id}.`)],
         });
       }
       logger.info(`Event enabled: ${id}`, "event-command");
-      return interaction.editReply({
+      return answer(interaction, {
         embeds: [createSuccessEmbed("Event enabled", `Event #${id} is now enabled.`)],
       });
     }
@@ -633,22 +634,23 @@ export default {
       const disabled = await setEventEnabled(id, false);
       if (!disabled) {
         logger.warn(`Event not found: ${id}`, "event-command");
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [createErrorEmbed("Event not found", `No event exists with ID #${id}.`)],
         });
       }
       logger.info(`Event disabled: ${id}`, "event-command");
-      return interaction.editReply({
+      return answer(interaction, {
         embeds: [createSuccessEmbed("Event disabled", `Event #${id} is now disabled.`)],
       });
     }
 
     if (sub === "run") {
+      await deferIfNeeded(interaction);
       const id = interaction.options.getInteger("id", true);
       const ev = await getEventById(id);
       if (!ev) {
         logger.warn(`Event not found for run: ${id}`, "event-command");
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [createErrorEmbed("Event not found", `No event exists with ID #${id}.`)],
         });
       }
@@ -656,12 +658,12 @@ export default {
       try {
         await sendToChannel(client, ev.channel_id, ev.message);
         logger.info(`Event executed manually: ${id}`, "event-command");
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [createSuccessEmbed("Event executed", `Event #${id} was sent successfully.`)],
         });
       } catch (err) {
         logger.error(`Failed to execute event: ${err?.message}`, "event-command");
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [
             createErrorEmbed(
               "Execution failed",
@@ -677,18 +679,18 @@ export default {
       const exists = await getEventById(id);
       if (!exists) {
         logger.warn(`Event not found for delete: ${id}`, "event-command");
-        return interaction.editReply({
+        return answer(interaction, {
           embeds: [createErrorEmbed("Event not found", `No event exists with ID #${id}.`)],
         });
       }
       await deleteEvent(id);
       logger.info(`Event deleted: ${id}`, "event-command");
-      return interaction.editReply({
+      return answer(interaction, {
         embeds: [createSuccessEmbed("Event deleted", `Event #${id} has been deleted.`)],
       });
     }
 
-    return interaction.editReply({
+    return answer(interaction, {
       embeds: [createErrorEmbed("Unknown subcommand", "That subcommand is not recognized.")],
     });
   },
