@@ -65,10 +65,16 @@ export default {
         .setName("create")
         .setDescription("Create an event — opens a live preview to confirm")
         .addStringOption((o) =>
-          o.setName("name").setDescription("Event name").setRequired(true)
+          o
+            .setName("label")
+            .setDescription("Internal name for the list only — not posted in the channel")
+            .setRequired(true)
         )
         .addStringOption((o) =>
-          o.setName("message").setDescription("Message to send").setRequired(true)
+          o
+            .setName("message")
+            .setDescription("Exact text the bot will post in the channel")
+            .setRequired(true)
         )
         .addIntegerOption((o) =>
           o
@@ -127,10 +133,16 @@ export default {
         .setDescription("Edit an existing event")
         .addIntegerOption((o) => idOption(o))
         .addStringOption((o) =>
-          o.setName("name").setDescription("Event name").setRequired(false)
+          o
+            .setName("label")
+            .setDescription("Internal name for the list only — not posted in the channel")
+            .setRequired(false)
         )
         .addStringOption((o) =>
-          o.setName("message").setDescription("Message to send").setRequired(false)
+          o
+            .setName("message")
+            .setDescription("Exact text the bot will post in the channel")
+            .setRequired(false)
         )
         .addIntegerOption((o) =>
           o
@@ -203,7 +215,7 @@ export default {
     const buildTag = `build ${CONFIG.BUILD} · ${instanceId ?? "?"}`;
 
     if (sub === "create") {
-      const name = interaction.options.getString("name", true);
+      const name = interaction.options.getString("label", true);
       const message = interaction.options.getString("message", true);
       const hour = interaction.options.getInteger("hour", true);
       const minute = interaction.options.getInteger("minute", true);
@@ -306,7 +318,7 @@ export default {
         });
       }
 
-      const name = interaction.options.getString("name", false) ?? existing.name;
+      const name = interaction.options.getString("label", false) ?? existing.name;
       const message = interaction.options.getString("message", false) ?? existing.message;
       const hourOption = interaction.options.getInteger("hour", false);
       const minuteOption = interaction.options.getInteger("minute", false);

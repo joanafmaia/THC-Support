@@ -405,7 +405,7 @@ async function handleCreateFlow(interaction) {
       embeds: [
         createSuccessEmbed(
           "Event created",
-          `**ID:** #${id}\n**Name:** ${draft.name}\n**Channel:** <#${draft.channelId}>\n**Next run:** ${formatUtc(draft.nextRun)}\n**Repeat:** ${draft.repeat}${draft.repeatValue != null ? ` (${draft.repeatValue})` : ""}`
+          `**ID:** #${id}\n**Label (internal):** ${draft.name}\n**Channel:** <#${draft.channelId}>\n**Next run:** ${formatUtc(draft.nextRun)}\n**Repeat:** ${draft.repeat}${draft.repeatValue != null ? ` (${draft.repeatValue})` : ""}\n\n_The channel will receive the message text, not the label._`
         ),
       ],
       components: [],

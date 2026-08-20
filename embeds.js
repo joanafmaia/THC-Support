@@ -88,7 +88,11 @@ export function createEventEmbed(event) {
       { name: "Channel", value: `<#${event.channel_id}>`, inline: true },
       { name: "Repeat", value: formatRepeat(event), inline: true },
       { name: "Next run", value: relativeTime(event.next_run), inline: false },
-      { name: "Message", value: truncate(event.message, 1024), inline: false }
+      {
+        name: "Message (posted to channel)",
+        value: truncate(event.message, 1024),
+        inline: false,
+      }
     )
     .setFooter({ text: `Created ${formatUtc(event.created_at)}` });
 }
@@ -133,14 +137,18 @@ export function createCreatePreviewEmbed(draft) {
     .setTitle(`Draft · ${draft.name}`)
     .setDescription(
       [
-        "Confirm the details before saving this event.",
-        "",
+        "**Message that will be posted** (edit with the button below):",
         "```",
         truncate(draft.message, 1800),
         "```",
       ].join("\n")
     )
     .addFields(
+      {
+        name: "Label (internal)",
+        value: `\`${truncate(draft.name, 200)}\`\n_Only shown in /event list — not sent to the channel_`,
+        inline: false,
+      },
       { name: "Channel", value: `<#${draft.channelId}>`, inline: true },
       { name: "Repeat", value: formatRepeat(draft.repeat, draft.repeatValue), inline: true },
       { name: "Timezone", value: offset, inline: true },
