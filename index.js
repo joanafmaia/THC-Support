@@ -137,7 +137,15 @@ function isValidStatsToken(provided) {
 
 const app = express();
 app.get("/", (req, res) => res.send("✅ THC Support Bot is running!"));
-app.get("/health", (req, res) => res.json({ status: "ok", uptime: process.uptime() }));
+app.get("/health", (req, res) =>
+  res.json({
+    status: "ok",
+    uptime: process.uptime(),
+    build: CONFIG.BUILD,
+    instance: INSTANCE_ID,
+    started_at: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+  })
+);
 
 app.get("/stats", async (req, res) => {
   if (CONFIG.STATS_TOKEN && !isValidStatsToken(req.headers["x-stats-token"])) {
@@ -164,6 +172,16 @@ app.get("/stats", async (req, res) => {
 client.once("clientReady", async () => {
   logger.info(`Bot ready! (${new Date().toISOString()})`);
   logger.info(`Instance ${INSTANCE_ID} — application ${client.application?.id}`, "startup");
+  logger.info(`Build ${CONFIG.BUILD}`, "startup");
+
+  try {
+    await client.user.setPresence({
+      activities: [{ name: `THC · ${CONFIG.BUILD}`, type: 3 }],
+      status: "online",
+    });
+  } catch (error) {
+    logger.warn(`Could not set presence: ${error?.message || error}`, "startup");
+  }
 
   await client.application.commands.set(
     [...client.commands.values()].map((c) => c.data)
