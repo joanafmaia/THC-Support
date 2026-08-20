@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } from "discord.js";
+import { SlashCommandBuilder, PermissionFlagsBits } from "discord.js";
 import {
   getEventById,
   updateEventById,
@@ -290,7 +290,7 @@ export default {
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    // Reply is deferred in index.js (must stay within Discord's 3s window).
 
     const client = interaction.client;
 

@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, MessageFlags } from "discord.js";
+import { SlashCommandBuilder } from "discord.js";
 import { backupDatabase, getLastBackupStatus } from "../backup.js";
 
 export default {
@@ -14,7 +14,7 @@ export default {
 
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    // Reply is deferred in index.js (must stay within Discord's 3s window).
 
     if (sub === "now") {
       await backupDatabase();

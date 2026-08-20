@@ -28,6 +28,17 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
 });
 
+/** Discord codes where the interaction token is gone — do not retry replies. */
+const UNRECOVERABLE_INTERACTION_CODES = new Set([
+  10062, // Unknown interaction
+  40060, // Interaction has already been acknowledged
+  50027, // Invalid Webhook Token
+]);
+
+function isUnrecoverableInteractionError(error) {
+  return UNRECOVERABLE_INTERACTION_CODES.has(error?.code);
+}
+
 async function respondToInteraction(interaction, payload) {
   try {
     if (interaction.deferred) {
@@ -40,6 +51,13 @@ async function respondToInteraction(interaction, payload) {
     }
     await interaction.reply(payload);
   } catch (error) {
+    if (isUnrecoverableInteractionError(error)) {
+      logger.warn(
+        `Interaction response skipped (${error.code}): ${error.message}`,
+        "interactionCreate"
+      );
+      return;
+    }
     logger.warn(`Interaction response failed: ${error?.message || error}`, "interactionCreate");
   }
 }
@@ -99,6 +117,26 @@ client.once("ready", async () => {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
+  // Acknowledge within Discord's ~3s window before any other work.
+  // On Render free tier / redeploys, late or duplicate handlers often hit Invalid Webhook Token.
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  } catch (error) {
+    if (isUnrecoverableInteractionError(error)) {
+      logger.warn(
+        `Could not acknowledge /${interaction.commandName} (${error.code}): ${error.message}. ` +
+          "Usually means another bot instance already responded, or the interaction expired.",
+        "interactionCreate"
+      );
+      return;
+    }
+    logger.error(
+      `Failed to defer /${interaction.commandName}: ${error?.message || error}`,
+      "interactionCreate"
+    );
+    return;
+  }
+
   if (isOnCooldown(interaction.user.id)) {
     const remaining = getRemainingCooldown(interaction.user.id);
     return respondToInteraction(interaction, {
@@ -110,13 +148,31 @@ client.on("interactionCreate", async (interaction) => {
   addCooldown(interaction.user.id);
 
   const cmd = client.commands.get(interaction.commandName);
-  if (!cmd) return;
+  if (!cmd) {
+    return respondToInteraction(interaction, {
+      content: "❌ Unknown command.",
+      flags: MessageFlags.Ephemeral,
+    });
+  }
 
   try {
     await cmd.execute(interaction);
   } catch (err) {
-    logger.error(`Command execution error: ${err?.message || err}`, "interactionCreate");
-    await respondToInteraction(interaction, { content: "❌ Command failed.", flags: MessageFlags.Ephemeral });
+    if (isUnrecoverableInteractionError(err)) {
+      logger.warn(
+        `Command /${interaction.commandName} aborted (${err.code}): ${err.message}`,
+        "interactionCreate"
+      );
+      return;
+    }
+    logger.error(
+      `Command /${interaction.commandName} error: ${err?.message || err}`,
+      "interactionCreate"
+    );
+    await respondToInteraction(interaction, {
+      content: "❌ Command failed.",
+      flags: MessageFlags.Ephemeral,
+    });
   }
 });
 
