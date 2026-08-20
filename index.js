@@ -5,6 +5,7 @@ import { logger } from "./logger.js";
 import { CONFIG } from "./config.js";
 import eventCommand from "./commands/event.js";
 import backupCommand from "./commands/backup.js";
+import pingCommand from "./commands/ping.js";
 import { startScheduler, getDueEvents } from "./scheduler.js";
 import { startBackupSchedule } from "./backup.js";
 import { isOnCooldown, addCooldown, getRemainingCooldown } from "./rateLimit.js";
@@ -39,7 +40,7 @@ function isUnrecoverableInteractionError(error) {
   return UNRECOVERABLE_INTERACTION_CODES.has(error?.code);
 }
 
-/** Strip flags from edit payloads — ephemeral is fixed at defer time; re-sending flags breaks editReply. */
+/** Strip flags from edit payloads — ephemeral is fixed at first reply; re-sending flags breaks editReply. */
 function normalizeEditPayload(payload) {
   if (payload == null || typeof payload === "string") return payload;
   const { flags: _flags, ...rest } = payload;
@@ -48,12 +49,8 @@ function normalizeEditPayload(payload) {
 
 async function respondToInteraction(interaction, payload) {
   try {
-    if (interaction.deferred) {
+    if (interaction.deferred || interaction.replied) {
       await interaction.editReply(normalizeEditPayload(payload));
-      return;
-    }
-    if (interaction.replied) {
-      await interaction.followUp(payload);
       return;
     }
     await interaction.reply(payload);
@@ -65,11 +62,15 @@ async function respondToInteraction(interaction, payload) {
       );
       return;
     }
-    logger.warn(`Interaction response failed: ${error?.message || error}`, "interactionCreate");
+    logger.warn(
+      `Interaction response failed: ${error?.message || error} (code=${error?.code ?? "?"})`,
+      "interactionCreate"
+    );
   }
 }
 
 client.commands = new Collection();
+client.commands.set(pingCommand.data.name, pingCommand);
 client.commands.set(eventCommand.data.name, eventCommand);
 client.commands.set(backupCommand.data.name, backupCommand);
 
@@ -102,8 +103,9 @@ app.get("/stats", async (req, res) => {
   }
 });
 
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   logger.info(`Bot ready! (${new Date().toISOString()})`);
+  logger.info(`Application ID: ${client.application?.id}`, "startup");
 
   await client.application.commands.set(
     [...client.commands.values()].map((c) => c.data)
@@ -124,10 +126,18 @@ client.once("ready", async () => {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
-  // Acknowledge within Discord's ~3s window before any other work.
-  // On Render free tier / redeploys, late or duplicate handlers often hit Invalid Webhook Token.
+  logger.info(
+    `Received /${interaction.commandName} from ${interaction.user.tag} ` +
+      `(app=${interaction.applicationId}, guild=${interaction.guildId ?? "DM"})`,
+    "interactionCreate"
+  );
+
+  // Real first reply (not defer) so the UI leaves "thinking…" even if later edits fail.
   try {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await interaction.reply({
+      content: "⏳ A processar…",
+      flags: MessageFlags.Ephemeral,
+    });
   } catch (error) {
     if (isUnrecoverableInteractionError(error)) {
       logger.warn(
@@ -138,7 +148,7 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
     logger.error(
-      `Failed to defer /${interaction.commandName}: ${error?.message || error}`,
+      `Failed to reply /${interaction.commandName}: ${error?.message || error} (code=${error?.code ?? "?"})`,
       "interactionCreate"
     );
     return;
@@ -161,8 +171,8 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   try {
-    logger.debug(`Executing /${interaction.commandName}`, "interactionCreate");
     await cmd.execute(interaction);
+    logger.info(`Finished /${interaction.commandName}`, "interactionCreate");
   } catch (err) {
     if (isUnrecoverableInteractionError(err)) {
       logger.warn(
