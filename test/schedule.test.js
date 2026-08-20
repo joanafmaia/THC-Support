@@ -8,6 +8,7 @@ import {
   validateRepeatValue,
   parseStartDateInput,
   resolveFirstRun,
+  isStaleDueEvent,
 } from "../lib/schedule.js";
 
 const at = (iso) => new Date(iso);
@@ -254,5 +255,21 @@ describe("parseStartDateInput / resolveFirstRun", () => {
       now: at("2026-08-20T10:00:00Z"),
     });
     assert.equal(run, "2026-08-20T20:30:00.000Z");
+  });
+});
+
+describe("isStaleDueEvent", () => {
+  it("treats a just-due event as fresh within the grace window", () => {
+    assert.equal(
+      isStaleDueEvent("2026-08-20T12:00:00.000Z", at("2026-08-20T12:01:00Z"), 120_000),
+      false
+    );
+  });
+
+  it("treats a long-overdue event as stale", () => {
+    assert.equal(
+      isStaleDueEvent("2026-08-20T10:00:00.000Z", at("2026-08-20T12:00:00Z"), 120_000),
+      true
+    );
   });
 });

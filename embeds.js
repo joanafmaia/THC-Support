@@ -175,6 +175,7 @@ export function createHistoryEmbed(entries, { title = "Recent history" } = {}) {
     enabled: "Enabled",
     disabled: "Disabled",
     run: "Ran manually",
+    skipped: "Skipped (offline)",
   };
 
   const lines = entries.map((entry) => {

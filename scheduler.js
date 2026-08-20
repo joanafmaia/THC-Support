@@ -6,10 +6,11 @@ import {
   rescheduleEvent,
   disableEventAfterRun,
   recordSendAttempt,
+  appendHistory,
 } from "./data/events.js";
 import { logger } from "./logger.js";
 import { CONFIG } from "./config.js";
-import { computeFollowingRun } from "./lib/schedule.js";
+import { computeFollowingRun, isStaleDueEvent } from "./lib/schedule.js";
 
 let intervalHandle = null;
 let cycleRunning = false;
@@ -92,6 +93,13 @@ async function runCycle(client) {
   if (!dueEvents.length) return;
 
   for (const event of dueEvents) {
+    // Bot was asleep / offline long enough that this run is stale — do not
+    // dump catch-up messages into the channel; only advance the schedule.
+    if (isStaleDueEvent(event.next_run, now, CONFIG.OVERDUE_SKIP_GRACE_MS)) {
+      await skipStaleEvent(event, now);
+      continue;
+    }
+
     const sent = await sendEventMessage(client, event, now);
 
     if (!sent) {
@@ -115,6 +123,58 @@ async function runCycle(client) {
     await rescheduleEvent(event.id, nextRun);
     logger.info(`${event.name} rescheduled to: ${nextRun}`, "scheduler");
   }
+}
+
+/**
+ * Drop a missed send and point the event at the next future occurrence.
+ */
+async function skipStaleEvent(event, now) {
+  const overdueMin = Math.round(
+    (now.getTime() - new Date(event.next_run).getTime()) / 60_000
+  );
+
+  if (event.repeat_type === "once") {
+    await disableEventAfterRun(event.id);
+    try {
+      await appendHistory({
+        eventId: event.id,
+        eventName: event.name,
+        action: "skipped",
+        detail: `Missed while offline (~${overdueMin}m overdue); one-off disabled`,
+      });
+    } catch {
+      // history is best-effort
+    }
+    logger.warn(
+      `Skipped stale one-off #${event.id} (${event.name}) — ~${overdueMin}m overdue, disabled`,
+      "scheduler"
+    );
+    return;
+  }
+
+  const nextRun = computeFollowingRun({
+    nextRun: event.next_run,
+    repeatType: event.repeat_type,
+    repeatValue: event.repeat_value,
+    timezoneOffset: event.timezone_offset ?? 0,
+    now,
+  });
+
+  await rescheduleEvent(event.id, nextRun);
+  try {
+    await appendHistory({
+      eventId: event.id,
+      eventName: event.name,
+      action: "skipped",
+      detail: `Missed while offline (~${overdueMin}m overdue); next ${nextRun}`,
+    });
+  } catch {
+    // history is best-effort
+  }
+  logger.warn(
+    `Skipped stale #${event.id} (${event.name}) — ~${overdueMin}m overdue, next ${nextRun}`,
+    "scheduler"
+  );
 }
 
 /**

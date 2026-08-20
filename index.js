@@ -196,7 +196,10 @@ client.once("clientReady", async () => {
     const overdue = await getDueEvents(new Date().toISOString());
     if (overdue.length > 0) {
       logger.warn(`Found ${overdue.length} overdue events on startup`, "startup");
-      logger.info("Overdue events will be processed by the scheduler", "startup");
+      logger.info(
+        "Stale overdue events will be skipped (schedule advanced, no catch-up sends)",
+        "startup"
+      );
     }
   } catch (error) {
     logger.error(`Could not check overdue events: ${error.message}`, "startup");

@@ -19,6 +19,11 @@ export const CONFIG = {
   // Scheduler
   CHECK_INTERVAL_MS: Number(process.env.CHECK_INTERVAL_MS) || 60_000, // 1 minute
   MAX_SEND_ATTEMPTS: Number(process.env.MAX_SEND_ATTEMPTS) || 5,
+  // If next_run is older than this, skip sending (bot was asleep) and only
+  // jump the schedule forward. Default: 2 check intervals.
+  OVERDUE_SKIP_GRACE_MS:
+    Number(process.env.OVERDUE_SKIP_GRACE_MS) ||
+    (Number(process.env.CHECK_INTERVAL_MS) || 60_000) * 2,
 
   // Discord Message
   MAX_MESSAGE_LENGTH: 2000,
