@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import express from "express";
 import { Client, GatewayIntentBits, Collection, MessageFlags } from "discord.js";
 
@@ -14,6 +16,9 @@ import { countEvents } from "./data/events.js";
 
 const TOKEN = CONFIG.DISCORD_TOKEN;
 const PORT = CONFIG.PORT;
+
+/** Identifies this process in logs and replies, so duplicate instances are detectable. */
+const INSTANCE_ID = randomUUID().slice(0, 8);
 
 if (!TOKEN) {
   logger.error("Error: DISCORD_TOKEN is missing in .env");
@@ -129,7 +134,7 @@ app.get("/stats", async (req, res) => {
 
 client.once("ready", async () => {
   logger.info(`Bot ready! (${new Date().toISOString()})`);
-  logger.info(`Application ID: ${client.application?.id}`, "startup");
+  logger.info(`Instance ${INSTANCE_ID} — application ${client.application?.id}`, "startup");
 
   await client.application.commands.set(
     [...client.commands.values()].map((c) => c.data)
@@ -150,9 +155,14 @@ client.once("ready", async () => {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
+  // Age = time between Discord creating the interaction and us handling it.
+  // Above ~3000ms the token is already dead on arrival (gateway delay), which
+  // is a different problem from another instance acknowledging it first.
+  const age = Date.now() - interaction.createdTimestamp;
+
   logger.info(
     `Received /${interaction.commandName} from ${interaction.user.tag} ` +
-      `(interactionApp=${interaction.applicationId}, clientApp=${interaction.client.application?.id}, guild=${interaction.guildId ?? "DM"})`,
+      `(instance=${INSTANCE_ID}, age=${age}ms, guild=${interaction.guildId ?? "DM"})`,
     "interactionCreate"
   );
 
@@ -187,7 +197,8 @@ client.on("interactionCreate", async (interaction) => {
       if (isUnrecoverableInteractionError(error)) {
         logger.warn(
           `Could not acknowledge /${interaction.commandName} (${error.code}): ${error.message}. ` +
-            "Usually means another bot instance already responded, or the interaction expired.",
+            `Interaction was ${Date.now() - interaction.createdTimestamp}ms old at failure ` +
+            `(instance=${INSTANCE_ID}).`,
           "interactionCreate"
         );
         return;
@@ -218,8 +229,8 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   try {
-    await cmd.execute(interaction);
-    logger.info(`Finished /${interaction.commandName}`, "interactionCreate");
+    await cmd.execute(interaction, { instanceId: INSTANCE_ID });
+    logger.info(`Finished /${interaction.commandName} (instance=${INSTANCE_ID})`, "interactionCreate");
   } catch (err) {
     if (isUnrecoverableInteractionError(err)) {
       logger.warn(
