@@ -30,7 +30,7 @@ import {
   saveCreateDraft,
 } from "../lib/drafts.js";
 import {
-  computeFirstRun,
+  resolveFirstRun,
   validateRepeatValue,
   parseTimeInput,
   localCalendarParts,
@@ -225,6 +225,7 @@ async function handleCreateFlow(interaction) {
     const label = interaction.fields.getTextInputValue("label").trim();
     const message = interaction.fields.getTextInputValue("message");
     const timeRaw = interaction.fields.getTextInputValue("time");
+    const startDateInput = interaction.fields.getTextInputValue("start_date").trim();
 
     const time = parseTimeInput(timeRaw);
     if (typeof time === "string") {
@@ -277,13 +278,20 @@ async function handleCreateFlow(interaction) {
     }
 
     const channelId = existing?.channelId ?? interaction.channelId;
-    const nextRun = computeFirstRun({
+    const nextRun = resolveFirstRun({
       hour: time.hour,
       minute: time.minute,
+      startDateInput,
       repeatType: repeat,
       repeatValue,
       timezoneOffset,
     });
+    if (!isIsoTimestamp(nextRun)) {
+      return interaction.reply({
+        embeds: [createErrorEmbed("Invalid start date", nextRun)],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
 
     const draft = {
       name: label,
@@ -291,6 +299,7 @@ async function handleCreateFlow(interaction) {
       hour: time.hour,
       minute: time.minute,
       timezoneOffset,
+      startDateInput: startDateInput || null,
       repeat,
       repeatValue,
       channelId,
@@ -334,13 +343,20 @@ async function handleCreateFlow(interaction) {
       });
     }
 
-    const nextRun = computeFirstRun({
+    const nextRun = resolveFirstRun({
       hour: draft.hour,
       minute: draft.minute,
+      startDateInput: draft.startDateInput,
       repeatType: "monthly",
       repeatValue: day,
       timezoneOffset: 0,
     });
+    if (!isIsoTimestamp(nextRun)) {
+      return interaction.reply({
+        embeds: [createErrorEmbed("Invalid start date", nextRun)],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
     const updated = touchCreateDraft(interaction.user.id, interaction.guildId, {
       repeat: "monthly",
       repeatValue: day,
@@ -436,13 +452,20 @@ async function handleCreateFlow(interaction) {
       });
     }
 
-    const nextRun = computeFirstRun({
+    const nextRun = resolveFirstRun({
       hour: draft.hour,
       minute: draft.minute,
+      startDateInput: draft.startDateInput,
       repeatType: repeat,
       repeatValue,
       timezoneOffset: 0,
     });
+    if (!isIsoTimestamp(nextRun)) {
+      return interaction.reply({
+        embeds: [createErrorEmbed("Invalid start date", nextRun)],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
     const updated = touchCreateDraft(interaction.user.id, interaction.guildId, {
       repeat,
       repeatValue,
@@ -466,13 +489,20 @@ async function handleCreateFlow(interaction) {
     }
 
     const weekday = Number(interaction.values[0]);
-    const nextRun = computeFirstRun({
+    const nextRun = resolveFirstRun({
       hour: draft.hour,
       minute: draft.minute,
+      startDateInput: draft.startDateInput,
       repeatType: "weekly",
       repeatValue: weekday,
       timezoneOffset: 0,
     });
+    if (!isIsoTimestamp(nextRun)) {
+      return interaction.reply({
+        embeds: [createErrorEmbed("Invalid start date", nextRun)],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
     const updated = touchCreateDraft(interaction.user.id, interaction.guildId, {
       repeat: "weekly",
       repeatValue: weekday,
@@ -584,6 +614,10 @@ async function handleCreateFlow(interaction) {
 
 function mentionsEveryone(message) {
   return /@everyone|@here/.test(message);
+}
+
+function isIsoTimestamp(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value);
 }
 
 function splitCustomId(customId) {

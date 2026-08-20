@@ -147,6 +147,13 @@ export function createCreatePreviewEmbed(draft) {
       { name: "Channel", value: `<#${draft.channelId}>`, inline: true },
       { name: "Repeat", value: formatRepeat(draft.repeat, draft.repeatValue), inline: true },
       { name: "Game time", value: `${time} UTC`, inline: true },
+      {
+        name: "First date",
+        value: draft.startDateInput
+          ? `\`${draft.startDateInput}\` (pinned start)`
+          : "_Next occurrence from now_",
+        inline: true,
+      },
       { name: "First run", value: relativeTime(draft.nextRun), inline: false }
     )
     .setFooter({ text: "Pick channel & repeat below · Edit details anytime" });

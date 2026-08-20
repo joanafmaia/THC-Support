@@ -6,6 +6,8 @@ import {
   computeFollowingRun,
   isValidRepeat,
   validateRepeatValue,
+  parseStartDateInput,
+  resolveFirstRun,
 } from "../lib/schedule.js";
 
 const at = (iso) => new Date(iso);
@@ -196,5 +198,61 @@ describe("validation", () => {
     assert.match(validateRepeatValue("monthly", 0), /1-31/);
     assert.equal(validateRepeatValue("weekly", 6), null);
     assert.equal(validateRepeatValue("monthly", 31), null);
+  });
+});
+
+describe("parseStartDateInput / resolveFirstRun", () => {
+  it("returns null for a blank start date", () => {
+    assert.equal(parseStartDateInput("", { hour: 20, minute: 0 }), null);
+    assert.equal(parseStartDateInput("  ", { hour: 20, minute: 0 }), null);
+  });
+
+  it("accepts +N calendar days from today UTC", () => {
+    const run = parseStartDateInput("+4", {
+      hour: 20,
+      minute: 30,
+      now: at("2026-08-20T10:00:00Z"),
+    });
+    assert.equal(run, "2026-08-24T20:30:00.000Z");
+  });
+
+  it("accepts an absolute YYYY-MM-DD date", () => {
+    const run = parseStartDateInput("2026-08-25", {
+      hour: 12,
+      minute: 0,
+      now: at("2026-08-20T10:00:00Z"),
+    });
+    assert.equal(run, "2026-08-25T12:00:00.000Z");
+  });
+
+  it("rejects a start in the past", () => {
+    const err = parseStartDateInput("2026-08-19", {
+      hour: 20,
+      minute: 0,
+      now: at("2026-08-20T10:00:00Z"),
+    });
+    assert.match(err, /future/);
+  });
+
+  it("resolveFirstRun uses the pinned date when provided", () => {
+    const run = resolveFirstRun({
+      hour: 20,
+      minute: 0,
+      startDateInput: "+4",
+      repeatType: "daily",
+      now: at("2026-08-20T10:00:00Z"),
+    });
+    assert.equal(run, "2026-08-24T20:00:00.000Z");
+  });
+
+  it("resolveFirstRun falls back to computeFirstRun when blank", () => {
+    const run = resolveFirstRun({
+      hour: 20,
+      minute: 30,
+      startDateInput: "",
+      repeatType: "daily",
+      now: at("2026-08-20T10:00:00Z"),
+    });
+    assert.equal(run, "2026-08-20T20:30:00.000Z");
   });
 });
