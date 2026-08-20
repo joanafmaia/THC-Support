@@ -8,7 +8,11 @@ let db;
 export async function connectDatabase() {
   if (db) return db;
 
-  client = new MongoClient(CONFIG.MONGODB_URI);
+  client = new MongoClient(CONFIG.MONGODB_URI, {
+    serverSelectionTimeoutMS: 8_000,
+    connectTimeoutMS: 8_000,
+    socketTimeoutMS: 15_000,
+  });
   await client.connect();
   db = client.db();
 

@@ -39,10 +39,17 @@ function isUnrecoverableInteractionError(error) {
   return UNRECOVERABLE_INTERACTION_CODES.has(error?.code);
 }
 
+/** Strip flags from edit payloads — ephemeral is fixed at defer time; re-sending flags breaks editReply. */
+function normalizeEditPayload(payload) {
+  if (payload == null || typeof payload === "string") return payload;
+  const { flags: _flags, ...rest } = payload;
+  return rest;
+}
+
 async function respondToInteraction(interaction, payload) {
   try {
     if (interaction.deferred) {
-      await interaction.editReply(payload);
+      await interaction.editReply(normalizeEditPayload(payload));
       return;
     }
     if (interaction.replied) {
@@ -141,7 +148,6 @@ client.on("interactionCreate", async (interaction) => {
     const remaining = getRemainingCooldown(interaction.user.id);
     return respondToInteraction(interaction, {
       content: `⏳ Please wait ${remaining}s before using another command.`,
-      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -151,11 +157,11 @@ client.on("interactionCreate", async (interaction) => {
   if (!cmd) {
     return respondToInteraction(interaction, {
       content: "❌ Unknown command.",
-      flags: MessageFlags.Ephemeral,
     });
   }
 
   try {
+    logger.debug(`Executing /${interaction.commandName}`, "interactionCreate");
     await cmd.execute(interaction);
   } catch (err) {
     if (isUnrecoverableInteractionError(err)) {
@@ -170,8 +176,7 @@ client.on("interactionCreate", async (interaction) => {
       "interactionCreate"
     );
     await respondToInteraction(interaction, {
-      content: "❌ Command failed.",
-      flags: MessageFlags.Ephemeral,
+      content: `❌ Command failed: ${err?.message || "unknown error"}`,
     });
   }
 });
