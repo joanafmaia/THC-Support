@@ -126,11 +126,6 @@ export function createEventListEmbed(
 }
 
 export function createCreatePreviewEmbed(draft) {
-  const offset =
-    draft.timezoneOffset === 0
-      ? "UTC"
-      : `UTC${draft.timezoneOffset > 0 ? "+" : ""}${draft.timezoneOffset}`;
-
   const time = `${String(draft.hour).padStart(2, "0")}:${String(draft.minute).padStart(2, "0")}`;
 
   return brandEmbed(COLORS.warn)
@@ -151,8 +146,7 @@ export function createCreatePreviewEmbed(draft) {
       },
       { name: "Channel", value: `<#${draft.channelId}>`, inline: true },
       { name: "Repeat", value: formatRepeat(draft.repeat, draft.repeatValue), inline: true },
-      { name: "Timezone", value: offset, inline: true },
-      { name: "Requested time", value: `${time} (${offset})`, inline: true },
+      { name: "Game time", value: `${time} UTC`, inline: true },
       { name: "First run", value: relativeTime(draft.nextRun), inline: false }
     )
     .setFooter({ text: "Pick channel & repeat below · Edit details anytime" });

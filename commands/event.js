@@ -84,7 +84,7 @@ export default {
         .addIntegerOption((o) =>
           o
             .setName("hour")
-            .setDescription("UTC hour (0-23)")
+            .setDescription("Game UTC hour (0-23)")
             .setRequired(false)
             .setMinValue(0)
             .setMaxValue(23)
@@ -92,18 +92,10 @@ export default {
         .addIntegerOption((o) =>
           o
             .setName("minute")
-            .setDescription("UTC minute (0-59)")
+            .setDescription("Game UTC minute (0-59)")
             .setRequired(false)
             .setMinValue(0)
             .setMaxValue(59)
-        )
-        .addIntegerOption((o) =>
-          o
-            .setName("timezone_offset")
-            .setDescription("Local offset from UTC (e.g., -3 for Brazil, 0 for Portugal).")
-            .setRequired(false)
-            .setMinValue(-12)
-            .setMaxValue(14)
         )
         .addStringOption((o) =>
           o
@@ -111,9 +103,9 @@ export default {
             .setDescription("Repeat type")
             .setRequired(false)
             .addChoices(
-              { name: "Once", value: "once" },
               { name: "Daily", value: "daily" },
               { name: "Every 2 days", value: "every2days" },
+              { name: "Once", value: "once" },
               { name: "Weekly", value: "weekly" },
               { name: "Monthly", value: "monthly" }
             )
@@ -168,7 +160,6 @@ export default {
       const message = interaction.options.getString("message", false) ?? existing.message;
       const hourOption = interaction.options.getInteger("hour", false);
       const minuteOption = interaction.options.getInteger("minute", false);
-      const timezoneOffset = interaction.options.getInteger("timezone_offset", false);
       const repeatOption = interaction.options.getString("repeat", false);
       const repeat = repeatOption ?? existing.repeat_type;
       const repeatValueOption = interaction.options.getInteger("repeat_value", false);
@@ -178,17 +169,6 @@ export default {
       if ((hourOption != null || minuteOption != null) && (hourOption == null || minuteOption == null)) {
         return answer(interaction, {
           embeds: [createErrorEmbed("Invalid time update", "Provide both hour and minute.")],
-        });
-      }
-
-      if (timezoneOffset != null && hourOption == null && minuteOption == null) {
-        return answer(interaction, {
-          embeds: [
-            createErrorEmbed(
-              "Invalid timezone offset",
-              "timezone_offset only applies when updating hour/minute."
-            ),
-          ],
         });
       }
 
@@ -256,19 +236,18 @@ export default {
         });
       }
 
-      const offset = timezoneOffset ?? existing.timezone_offset ?? 0;
+      // Game schedule is always UTC.
+      const offset = 0;
 
       const nextRun = (() => {
         if (!shouldRecalculate) {
           return existing.next_run;
         }
-        // Existing runs are stored in UTC, so read the current time back in the
-        // event's own timezone before applying the requested hour/minute.
-        const localBase = new Date(new Date(existing.next_run).getTime() + offset * 3_600_000);
+        const utcBase = new Date(existing.next_run);
 
         return computeFirstRun({
-          hour: hourOption ?? localBase.getUTCHours(),
-          minute: minuteOption ?? localBase.getUTCMinutes(),
+          hour: hourOption ?? utcBase.getUTCHours(),
+          minute: minuteOption ?? utcBase.getUTCMinutes(),
           repeatType: repeat,
           repeatValue: repeatValue ?? null,
           timezoneOffset: offset,

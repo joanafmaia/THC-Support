@@ -33,7 +33,6 @@ import {
   computeFirstRun,
   validateRepeatValue,
   parseTimeInput,
-  parseTimezoneInput,
   localCalendarParts,
 } from "../lib/schedule.js";
 import { PermissionFlagsBits, MessageFlags } from "discord.js";
@@ -226,7 +225,6 @@ async function handleCreateFlow(interaction) {
     const label = interaction.fields.getTextInputValue("label").trim();
     const message = interaction.fields.getTextInputValue("message");
     const timeRaw = interaction.fields.getTextInputValue("time");
-    const tzRaw = interaction.fields.getTextInputValue("timezone");
 
     const time = parseTimeInput(timeRaw);
     if (typeof time === "string") {
@@ -236,13 +234,8 @@ async function handleCreateFlow(interaction) {
       });
     }
 
-    const timezoneOffset = parseTimezoneInput(tzRaw);
-    if (typeof timezoneOffset === "string") {
-      return interaction.reply({
-        embeds: [createErrorEmbed("Invalid timezone", timezoneOffset)],
-        flags: MessageFlags.Ephemeral,
-      });
-    }
+    // Game schedule is always UTC.
+    const timezoneOffset = 0;
 
     if (!label) {
       return interaction.reply({
@@ -346,11 +339,12 @@ async function handleCreateFlow(interaction) {
       minute: draft.minute,
       repeatType: "monthly",
       repeatValue: day,
-      timezoneOffset: draft.timezoneOffset,
+      timezoneOffset: 0,
     });
     const updated = touchCreateDraft(interaction.user.id, interaction.guildId, {
       repeat: "monthly",
       repeatValue: day,
+      timezoneOffset: 0,
       nextRun,
     });
 
@@ -422,7 +416,7 @@ async function handleCreateFlow(interaction) {
     }
 
     const repeat = interaction.values[0];
-    const local = localCalendarParts(draft.timezoneOffset);
+    const local = localCalendarParts(0);
     let repeatValue = null;
     if (repeat === "weekly") {
       repeatValue = draft.repeat === "weekly" && draft.repeatValue != null
@@ -447,11 +441,12 @@ async function handleCreateFlow(interaction) {
       minute: draft.minute,
       repeatType: repeat,
       repeatValue,
-      timezoneOffset: draft.timezoneOffset,
+      timezoneOffset: 0,
     });
     const updated = touchCreateDraft(interaction.user.id, interaction.guildId, {
       repeat,
       repeatValue,
+      timezoneOffset: 0,
       nextRun,
     });
     return interaction.update({
@@ -476,11 +471,12 @@ async function handleCreateFlow(interaction) {
       minute: draft.minute,
       repeatType: "weekly",
       repeatValue: weekday,
-      timezoneOffset: draft.timezoneOffset,
+      timezoneOffset: 0,
     });
     const updated = touchCreateDraft(interaction.user.id, interaction.guildId, {
       repeat: "weekly",
       repeatValue: weekday,
+      timezoneOffset: 0,
       nextRun,
     });
     return interaction.update({
@@ -559,7 +555,7 @@ async function handleCreateFlow(interaction) {
       nextRun: draft.nextRun,
       repeatType: draft.repeat,
       repeatValue: draft.repeatValue,
-      timezoneOffset: draft.timezoneOffset,
+      timezoneOffset: 0,
     });
 
     clearCreateDraft(interaction.user.id, interaction.guildId);
