@@ -5,6 +5,7 @@ import {
   listEvents,
 } from "../data/events.js";
 import { logger } from "../logger.js";
+import { CONFIG } from "../config.js";
 import {
   createErrorEmbed,
   createEventEmbed,
@@ -196,9 +197,10 @@ export default {
 
   autocomplete: autocompleteEventId,
   handleComponent: handleEventComponent,
-  async execute(interaction) {
+  async execute(interaction, { instanceId } = {}) {
     const sub = interaction.options.getSubcommand();
     const client = interaction.client;
+    const buildTag = `build ${CONFIG.BUILD} · ${instanceId ?? "?"}`;
 
     if (sub === "create") {
       const name = interaction.options.getString("name", true);
@@ -460,6 +462,7 @@ export default {
         embeds: [
           createEventListEmbed(rows, {
             title: showAll ? "All events" : "Active events",
+            footerExtra: buildTag,
           }),
         ],
         components: select ? [select] : [],

@@ -351,7 +351,16 @@ async function shutdown(reason, exitCode = 0) {
   stopBackupSchedule();
 
   const steps = [
-    ["Discord client", async () => client.destroy()],
+    // Drop the gateway first so this process stops racing for interactions
+    // while Mongo/HTTP are still closing (critical on Render redeploys).
+    ["Discord client", async () => {
+      try {
+        client.user?.setStatus("invisible");
+      } catch {
+        // ignore
+      }
+      await client.destroy();
+    }],
     ["HTTP server", async () => httpServer && new Promise((resolve) => httpServer.close(resolve))],
     ["MongoDB", closeDatabase],
   ];

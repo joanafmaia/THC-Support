@@ -93,7 +93,10 @@ export function createEventEmbed(event) {
     .setFooter({ text: `Created ${formatUtc(event.created_at)}` });
 }
 
-export function createEventListEmbed(events, { title = "Active events" } = {}) {
+export function createEventListEmbed(
+  events,
+  { title = "Active events", footerExtra = null } = {}
+) {
   const embed = brandEmbed(COLORS.brand).setTitle(title);
 
   if (!events.length) {
@@ -111,8 +114,9 @@ export function createEventListEmbed(events, { title = "Active events" } = {}) {
   });
 
   embed.setDescription(truncate(lines.join("\n\n"), 4000));
+  const base = `${events.length} event(s) · pick one below to manage`;
   embed.setFooter({
-    text: `${events.length} event(s) · pick one below to manage`,
+    text: footerExtra ? `${base} · ${footerExtra}` : base,
   });
   return embed;
 }

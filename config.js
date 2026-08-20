@@ -24,6 +24,10 @@ export const CONFIG = {
   MAX_MESSAGE_LENGTH: 2000,
   EMBED_COLOR: 0x00A651, // Hulk green
 
+  // Shown in embeds so duplicate / stale instances are easy to spot
+  BUILD:
+    (process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT || "local").slice(0, 7),
+
   // Logging
   LOG_LEVEL: process.env.LOG_LEVEL || "info",
 

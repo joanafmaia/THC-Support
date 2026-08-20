@@ -60,7 +60,7 @@ export default {
         }
       )
       .setFooter({
-        text: `instance ${instanceId ?? "?"} · uptime ${formatUptime(process.uptime())}`,
+        text: `build ${CONFIG.BUILD} · instance ${instanceId ?? "?"} · uptime ${formatUptime(process.uptime())}`,
       })
       .setTimestamp();
 
