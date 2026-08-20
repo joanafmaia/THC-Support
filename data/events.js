@@ -79,10 +79,76 @@ export async function getNextEvent() {
   return eventsCollection().findOne({ enabled: true }, { sort: { next_run: 1 } });
 }
 
-export async function listEvents() {
+export async function listEvents({ enabledOnly = true } = {}) {
+  const filter = enabledOnly ? { enabled: true } : {};
   return eventsCollection()
-    .find({}, { projection: { id: 1, name: 1, channel_id: 1, next_run: 1, repeat_type: 1, repeat_value: 1, enabled: 1 } })
+    .find(filter, {
+      projection: {
+        id: 1,
+        name: 1,
+        channel_id: 1,
+        next_run: 1,
+        repeat_type: 1,
+        repeat_value: 1,
+        enabled: 1,
+      },
+    })
     .sort({ enabled: -1, next_run: 1 })
+    .toArray();
+}
+
+/** Up to 25 choices for Discord autocomplete, filtered by id or name. */
+export async function searchEventsForAutocomplete(focused = "", { limit = 25 } = {}) {
+  const query = String(focused ?? "").trim();
+  const filter = {};
+
+  if (query) {
+    const asNumber = Number(query);
+    if (Number.isInteger(asNumber)) {
+      filter.$or = [{ id: asNumber }, { name: { $regex: escapeRegex(query), $options: "i" } }];
+    } else {
+      filter.name = { $regex: escapeRegex(query), $options: "i" };
+    }
+  }
+
+  return eventsCollection()
+    .find(filter, { projection: { id: 1, name: 1, enabled: 1, next_run: 1 } })
+    .sort({ enabled: -1, next_run: 1 })
+    .limit(limit)
+    .toArray();
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function historyCollection() {
+  return getDb().collection("history");
+}
+
+export async function appendHistory({
+  eventId = null,
+  eventName = null,
+  action,
+  detail = null,
+  userId = null,
+}) {
+  await historyCollection().insertOne({
+    event_id: eventId,
+    event_name: eventName,
+    action,
+    detail,
+    user_id: userId,
+    at: nowIso(),
+  });
+}
+
+export async function getRecentHistory({ eventId = null, limit = 15 } = {}) {
+  const filter = eventId == null ? {} : { event_id: eventId };
+  return historyCollection()
+    .find(filter)
+    .sort({ at: -1 })
+    .limit(limit)
     .toArray();
 }
 
@@ -123,6 +189,7 @@ export async function disableEventAfterRun(id) {
 }
 
 export async function recordSendAttempt(id, { success, error = null, attemptedAt }) {
+  const event = await getEventById(id);
   const update = {
     $set: {
       last_attempt_at: attemptedAt,
@@ -138,6 +205,13 @@ export async function recordSendAttempt(id, { success, error = null, attemptedAt
   }
 
   await eventsCollection().updateOne({ id }, update);
+
+  await appendHistory({
+    eventId: id,
+    eventName: event?.name ?? null,
+    action: success ? "sent" : "failed",
+    detail: success ? null : error,
+  });
 }
 
 export async function countEvents() {

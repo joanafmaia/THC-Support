@@ -6,6 +6,8 @@ import {
   listEventsForPreview,
   getEventForPreview,
   setEventEnabled,
+  appendHistory,
+  getRecentHistory,
 } from "../data/events.js";
 import { logger } from "../logger.js";
 import {
@@ -14,6 +16,7 @@ import {
   createEventListEmbed,
   createEventPreviewEmbed,
   createEventPreviewListEmbed,
+  createHistoryEmbed,
   createInfoEmbed,
   createSuccessEmbed,
   formatUtc,
@@ -30,6 +33,16 @@ import {
   validateRepeatValue,
 } from "../lib/schedule.js";
 import { answer } from "../lib/respond.js";
+import { buildEventSelectMenu } from "../lib/components.js";
+import { autocompleteEventId, handleEventComponent } from "./eventUi.js";
+
+function idOption(option, { required = true, description = "Event ID" } = {}) {
+  return option
+    .setName("id")
+    .setDescription(description)
+    .setRequired(required)
+    .setAutocomplete(true);
+}
 
 async function sendToChannel(client, channelId, content) {
   const channel = await client.channels.fetch(channelId);
@@ -130,9 +143,7 @@ export default {
       sc
         .setName("edit")
         .setDescription("Edit an existing event")
-        .addIntegerOption((o) =>
-          o.setName("id").setDescription("Event ID").setRequired(true)
-        )
+        .addIntegerOption((o) => idOption(o))
         .addStringOption((o) =>
           o.setName("name").setDescription("Event name").setRequired(false)
         )
@@ -195,7 +206,15 @@ export default {
     )
 
     .addSubcommand((sc) =>
-      sc.setName("list").setDescription("List all scheduled events")
+      sc
+        .setName("list")
+        .setDescription("List active events (use all:true to include disabled)")
+        .addBooleanOption((o) =>
+          o
+            .setName("all")
+            .setDescription("Include disabled / finished events")
+            .setRequired(false)
+        )
     )
 
     .addSubcommand((sc) =>
@@ -203,7 +222,7 @@ export default {
         .setName("preview")
         .setDescription("Preview the message for scheduled events")
         .addIntegerOption((o) =>
-          o.setName("id").setDescription("Event ID to preview").setRequired(false)
+          idOption(o, { required: false, description: "Event ID to preview" })
         )
         .addBooleanOption((o) =>
           o
@@ -223,40 +242,43 @@ export default {
 
     .addSubcommand((sc) =>
       sc
+        .setName("history")
+        .setDescription("Show recent send / manage history")
+        .addIntegerOption((o) =>
+          idOption(o, { required: false, description: "Filter history to one event" })
+        )
+    )
+
+    .addSubcommand((sc) =>
+      sc
         .setName("enable")
         .setDescription("Enable an event")
-        .addIntegerOption((o) =>
-          o.setName("id").setDescription("Event ID").setRequired(true)
-        )
+        .addIntegerOption((o) => idOption(o))
     )
 
     .addSubcommand((sc) =>
       sc
         .setName("disable")
         .setDescription("Disable an event")
-        .addIntegerOption((o) =>
-          o.setName("id").setDescription("Event ID").setRequired(true)
-        )
+        .addIntegerOption((o) => idOption(o))
     )
 
     .addSubcommand((sc) =>
       sc
         .setName("run")
         .setDescription("Run an event now")
-        .addIntegerOption((o) =>
-          o.setName("id").setDescription("Event ID").setRequired(true)
-        )
+        .addIntegerOption((o) => idOption(o))
     )
 
     .addSubcommand((sc) =>
       sc
         .setName("delete")
         .setDescription("Delete an event")
-        .addIntegerOption((o) =>
-          o.setName("id").setDescription("Event ID").setRequired(true)
-        )
+        .addIntegerOption((o) => idOption(o))
     ),
 
+  autocomplete: autocompleteEventId,
+  handleComponent: handleEventComponent,
   async execute(interaction) {
     const sub = interaction.options.getSubcommand();
     const client = interaction.client;
@@ -349,6 +371,12 @@ export default {
       });
 
       logger.info(`Event created: ${name} (ID: ${id})`, "event-command");
+      await appendHistory({
+        eventId: id,
+        eventName: name,
+        action: "created",
+        userId: interaction.user.id,
+      });
       return answer(interaction, {
         embeds: [
           createSuccessEmbed(
@@ -516,15 +544,56 @@ export default {
     }
 
     if (sub === "list") {
-      const rows = await listEvents();
+      const showAll = interaction.options.getBoolean("all", false) ?? false;
+      const rows = await listEvents({ enabledOnly: !showAll });
 
       if (!rows.length) {
         return answer(interaction, {
-          embeds: [createInfoEmbed("No events found", "No scheduled events exist yet.")],
+          embeds: [
+            createInfoEmbed(
+              showAll ? "Sem eventos" : "Sem eventos ativos",
+              showAll
+                ? "Ainda não existem eventos."
+                : "Não há eventos ativos. Usa `/event list all:True` para ver os desativados."
+            ),
+          ],
         });
       }
 
-      return answer(interaction, { embeds: [createEventListEmbed(rows)] });
+      const select = buildEventSelectMenu(rows);
+      return answer(interaction, {
+        embeds: [
+          createEventListEmbed(rows, {
+            title: showAll ? "📅 Todos os eventos" : "📅 Eventos ativos",
+          }),
+        ],
+        components: select ? [select] : [],
+      });
+    }
+
+    if (sub === "history") {
+      const id = interaction.options.getInteger("id", false);
+      if (id != null) {
+        const event = await getEventById(id);
+        if (!event) {
+          return answer(interaction, {
+            embeds: [createErrorEmbed("Event not found", `No event exists with ID #${id}.`)],
+          });
+        }
+        const entries = await getRecentHistory({ eventId: id, limit: 15 });
+        return answer(interaction, {
+          embeds: [
+            createHistoryEmbed(entries, {
+              title: `📜 Histórico · #${id} ${event.name}`,
+            }),
+          ],
+        });
+      }
+
+      const entries = await getRecentHistory({ limit: 15 });
+      return answer(interaction, {
+        embeds: [createHistoryEmbed(entries)],
+      });
     }
 
     if (sub === "preview") {
@@ -586,8 +655,12 @@ export default {
         "`/event enable id:<id>` / `/event disable id:<id>` / `/event delete id:<id>`",
         "",
         "**Inspect**",
-        "`/event list` / `/event next` / `/event due`",
+        "`/event list` — só ativos (usa `all:True` para ver todos)",
+        "`/event next` / `/event due` / `/event history [id]`",
         "`/event preview id:<id>` / `/event preview all:true`",
+        "",
+        "**Tip**",
+        "No `/event list`, escolhe um evento no menu para Ativar, Correr, Apagar ou ver Histórico.",
         "",
         "**Repeat values**",
         "`weekly repeat_value`: 0-6 (Sun-Sat)",
@@ -622,6 +695,13 @@ export default {
         });
       }
       logger.info(`Event enabled: ${id}`, "event-command");
+      const enabledEvent = await getEventById(id);
+      await appendHistory({
+        eventId: id,
+        eventName: enabledEvent?.name,
+        action: "enabled",
+        userId: interaction.user.id,
+      });
       return answer(interaction, {
         embeds: [createSuccessEmbed("Event enabled", `Event #${id} is now enabled.`)],
       });
@@ -637,6 +717,13 @@ export default {
         });
       }
       logger.info(`Event disabled: ${id}`, "event-command");
+      const disabledEvent = await getEventById(id);
+      await appendHistory({
+        eventId: id,
+        eventName: disabledEvent?.name,
+        action: "disabled",
+        userId: interaction.user.id,
+      });
       return answer(interaction, {
         embeds: [createSuccessEmbed("Event disabled", `Event #${id} is now disabled.`)],
       });
@@ -655,6 +742,12 @@ export default {
       try {
         await sendToChannel(client, ev.channel_id, ev.message);
         logger.info(`Event executed manually: ${id}`, "event-command");
+        await appendHistory({
+          eventId: id,
+          eventName: ev.name,
+          action: "run",
+          userId: interaction.user.id,
+        });
         return answer(interaction, {
           embeds: [createSuccessEmbed("Event executed", `Event #${id} was sent successfully.`)],
         });
@@ -682,6 +775,12 @@ export default {
       }
       await deleteEvent(id);
       logger.info(`Event deleted: ${id}`, "event-command");
+      await appendHistory({
+        eventId: id,
+        eventName: exists.name,
+        action: "deleted",
+        userId: interaction.user.id,
+      });
       return answer(interaction, {
         embeds: [createSuccessEmbed("Event deleted", `Event #${id} has been deleted.`)],
       });

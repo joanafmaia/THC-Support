@@ -186,6 +186,51 @@ client.once("clientReady", async () => {
 });
 
 client.on("interactionCreate", async (interaction) => {
+  if (interaction.isAutocomplete()) {
+    const cmd = client.commands.get(interaction.commandName);
+    if (!cmd?.autocomplete) return;
+    try {
+      await cmd.autocomplete(interaction);
+    } catch (error) {
+      logger.warn(`Autocomplete failed: ${error?.message || error}`, "interactionCreate");
+    }
+    return;
+  }
+
+  if (interaction.isButton() || interaction.isStringSelectMenu()) {
+    if (discordApiIsCoolingDown()) {
+      try {
+        await interaction.reply({
+          content: "⏳ Discord ainda está a limitar pedidos. Espera um pouco.",
+          ephemeral: true,
+        });
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    const eventCmd = client.commands.get("event");
+    if (eventCmd?.handleComponent) {
+      try {
+        await eventCmd.handleComponent(interaction);
+      } catch (error) {
+        logger.error(`Component handler failed: ${error?.message || error}`, "interactionCreate");
+        if (!interaction.replied && !interaction.deferred) {
+          try {
+            await interaction.reply({
+              content: `❌ ${error?.message || "Action failed"}`,
+              ephemeral: true,
+            });
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   // Age = time between Discord creating the interaction and us handling it.

@@ -62,7 +62,7 @@ export function createEventEmbed(event) {
       },
       {
         name: "⏰ Next run",
-        value: formatUtc(event.next_run),
+        value: relativeTime(event.next_run),
         inline: true,
       },
       {
@@ -80,21 +80,66 @@ export function createEventEmbed(event) {
     .setFooter({ text: `Created at: ${formatUtc(event.created_at)}` });
 }
 
-export function createEventListEmbed(events) {
+export function createEventListEmbed(events, { title = "📅 Eventos ativos" } = {}) {
   const embed = new EmbedBuilder()
-    .setTitle("📅 Scheduled events")
+    .setTitle(title)
     .setColor(CONFIG.EMBED_COLOR)
     .setTimestamp();
 
+  if (!events.length) {
+    embed.setDescription("Nenhum evento neste filtro.");
+    return embed;
+  }
+
   const lines = events.map((event) => {
     const status = event.enabled ? "✅" : "⛔";
-    return `${status} **#${event.id} ${event.name}**\n📍 <#${event.channel_id}>\n⏰ ${formatUtc(event.next_run)}\n🔁 ${formatRepeat(event)}`;
+    const when = relativeTime(event.next_run);
+    return `${status} **#${event.id} ${event.name}**\n📍 <#${event.channel_id}> · ⏰ ${when}\n🔁 ${formatRepeat(event)}`;
   });
 
-  const description = lines.join("\n\n");
-  embed.setDescription(truncate(description, 4000));
-
+  embed.setDescription(truncate(lines.join("\n\n"), 4000));
+  embed.setFooter({ text: `${events.length} evento(s) · usa o menu abaixo para gerir` });
   return embed;
+}
+
+export function createHistoryEmbed(entries, { title = "📜 Histórico recente" } = {}) {
+  const embed = new EmbedBuilder()
+    .setTitle(title)
+    .setColor(CONFIG.EMBED_COLOR)
+    .setTimestamp();
+
+  if (!entries.length) {
+    embed.setDescription("Ainda não há registos.");
+    return embed;
+  }
+
+  const actionLabel = {
+    sent: "✅ Enviado",
+    failed: "❌ Falhou",
+    created: "🆕 Criado",
+    deleted: "🗑️ Apagado",
+    enabled: "▶️ Ativado",
+    disabled: "⏸️ Desativado",
+    run: "⚡ Corrido à mão",
+  };
+
+  const lines = entries.map((entry) => {
+    const label = actionLabel[entry.action] ?? entry.action;
+    const name = entry.event_name ? `#${entry.event_id} ${entry.event_name}` : `#${entry.event_id ?? "?"}`;
+    const detail = entry.detail ? ` — ${truncate(entry.detail, 80)}` : "";
+    return `**${label}** · ${name}\n${formatUtc(entry.at)}${detail}`;
+  });
+
+  embed.setDescription(truncate(lines.join("\n\n"), 4000));
+  return embed;
+}
+
+/** Discord relative timestamp, e.g. "in 2 hours". */
+export function relativeTime(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "unknown";
+  const unix = Math.floor(date.getTime() / 1000);
+  return `<t:${unix}:R> (<t:${unix}:f>)`;
 }
 
 export function createEventPreviewEmbed(event) {
@@ -138,11 +183,13 @@ export function createEventPreviewListEmbed(events) {
 
 export default {
   formatUtc,
+  relativeTime,
   createSuccessEmbed,
   createErrorEmbed,
   createEventEmbed,
   createEventListEmbed,
   createEventPreviewEmbed,
   createEventPreviewListEmbed,
+  createHistoryEmbed,
   createInfoEmbed,
 };

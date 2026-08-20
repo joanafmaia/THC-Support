@@ -24,7 +24,10 @@ export async function connectDatabase() {
   const events = db.collection("events");
   await events.createIndex({ id: 1 }, { unique: true });
   await events.createIndex({ enabled: 1, next_run: 1 });
+  await events.createIndex({ name: 1 });
   await db.collection("backups").createIndex({ created_at: -1 });
+  await db.collection("history").createIndex({ at: -1 });
+  await db.collection("history").createIndex({ event_id: 1, at: -1 });
 
   logger.info("MongoDB connected", "database");
   return db;
