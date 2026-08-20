@@ -155,7 +155,7 @@ export function createCreatePreviewEmbed(draft) {
       { name: "Requested time", value: `${time} (${offset})`, inline: true },
       { name: "First run", value: relativeTime(draft.nextRun), inline: false }
     )
-    .setFooter({ text: "Change channel, repeat, or message below" });
+    .setFooter({ text: "Pick channel & repeat below · Edit details anytime" });
 }
 
 export function createHistoryEmbed(entries, { title = "Recent history" } = {}) {

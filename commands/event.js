@@ -10,7 +10,6 @@ import {
   createErrorEmbed,
   createEventEmbed,
   createEventListEmbed,
-  createCreatePreviewEmbed,
   createInfoEmbed,
   createSuccessEmbed,
 } from "../embeds.js";
@@ -20,8 +19,7 @@ import {
   validateRepeatValue,
 } from "../lib/schedule.js";
 import { answer } from "../lib/respond.js";
-import { buildEventSelectMenu, buildCreatePreviewComponents } from "../lib/components.js";
-import { saveCreateDraft } from "../lib/drafts.js";
+import { buildEventSelectMenu, buildCreateSetupModal } from "../lib/components.js";
 import { autocompleteEventId, handleEventComponent } from "./eventUi.js";
 
 function idOption(option, { required = true, description = "Event ID" } = {}) {
@@ -63,68 +61,7 @@ export default {
     .addSubcommand((sc) =>
       sc
         .setName("create")
-        .setDescription("Create an event — opens a live preview to confirm")
-        .addStringOption((o) =>
-          o
-            .setName("label")
-            .setDescription("Internal name for the list only — not posted in the channel")
-            .setRequired(true)
-        )
-        .addStringOption((o) =>
-          o
-            .setName("message")
-            .setDescription("Exact text the bot will post in the channel")
-            .setRequired(true)
-        )
-        .addIntegerOption((o) =>
-          o
-            .setName("hour")
-            .setDescription("Game UTC hour (0-23)")
-            .setRequired(true)
-            .setMinValue(0)
-            .setMaxValue(23)
-        )
-        .addIntegerOption((o) =>
-          o
-            .setName("minute")
-            .setDescription("Game UTC minute (0-59)")
-            .setRequired(true)
-            .setMinValue(0)
-            .setMaxValue(59)
-        )
-        .addStringOption((o) =>
-          o
-            .setName("repeat")
-            .setDescription("Repeat type")
-            .setRequired(true)
-            .addChoices(
-              { name: "Once", value: "once" },
-              { name: "Daily", value: "daily" },
-              { name: "Every 2 days", value: "every2days" },
-              { name: "Weekly", value: "weekly" },
-              { name: "Monthly", value: "monthly" }
-            )
-        )
-        .addIntegerOption((o) =>
-          o
-            .setName("repeat_value")
-            .setDescription("Weekly: 0-6 (Sun-Sat). Monthly: 1-31.")
-            .setRequired(false)
-        )
-        .addIntegerOption((o) =>
-          o
-            .setName("timezone_offset")
-            .setDescription("Local offset from UTC (e.g., -3 for Brazil, 0 for Portugal).")
-            .setRequired(false)
-            .setMinValue(-12)
-            .setMaxValue(14)
-        )
-        .addStringOption((o) =>
-          o
-            .setName("channel_id")
-            .setDescription("Target channel ID (optional). Defaults to current channel.")
-            .setRequired(false)
-        )
+        .setDescription("Create an event — guided form, then confirm")
     )
 
     .addSubcommand((sc) =>
@@ -215,98 +152,7 @@ export default {
     const buildTag = `build ${CONFIG.BUILD} · ${instanceId ?? "?"}`;
 
     if (sub === "create") {
-      const name = interaction.options.getString("label", true);
-      const message = interaction.options.getString("message", true);
-      const hour = interaction.options.getInteger("hour", true);
-      const minute = interaction.options.getInteger("minute", true);
-      const timezoneOffset = interaction.options.getInteger("timezone_offset", false) ?? 0;
-      const repeat = interaction.options.getString("repeat", true);
-      const repeatValue = interaction.options.getInteger("repeat_value", false);
-      const channelId = interaction.options.getString("channel_id", false) || interaction.channelId;
-
-      if (message.length > 2000) {
-        return answer(interaction, {
-          embeds: [createErrorEmbed("Message too long", "Maximum length is 2000 characters.")],
-        });
-      }
-
-      if (missingMentionPermission(interaction, message)) {
-        return answer(interaction, { embeds: [MENTION_PERMISSION_ERROR] });
-      }
-
-      try {
-        const channel = await client.channels.fetch(channelId);
-        if (!channel || !channel.isTextBased()) {
-          logger.warn(`Invalid channel ID: ${channelId}`, "event-command");
-          return answer(interaction, {
-            embeds: [createErrorEmbed("Channel not found", "Please provide a valid text channel ID.")],
-          });
-        }
-        const botPermissions = channel.permissionsFor(interaction.guild?.members.me);
-        if (botPermissions) {
-          if (!botPermissions.has(PermissionFlagsBits.ViewChannel)) {
-            return answer(interaction, {
-              embeds: [createErrorEmbed("Missing permission", "I can't view that channel.")],
-            });
-          }
-          if (!botPermissions.has(PermissionFlagsBits.SendMessages)) {
-            return answer(interaction, {
-              embeds: [createErrorEmbed("Missing permission", "I can't send messages in that channel.")],
-            });
-          }
-        }
-      } catch (error) {
-        logger.warn(`Failed to fetch channel ${channelId}: ${error.message}`, "event-command");
-        return answer(interaction, {
-          embeds: [createErrorEmbed("Invalid channel", "Channel lookup failed. Check the channel ID.")],
-        });
-      }
-
-      if (!isValidRepeat(repeat)) {
-        logger.warn(`Invalid repeat type: ${repeat}`, "event-command");
-        return answer(interaction, {
-          embeds: [
-            createErrorEmbed(
-              "Invalid repeat type",
-              "Use one of: once, daily, every2days, weekly, monthly."
-            ),
-          ],
-        });
-      }
-
-      const repeatValueError = validateRepeatValue(repeat, repeatValue);
-      if (repeatValueError) {
-        return answer(interaction, {
-          embeds: [createErrorEmbed("Invalid repeat value", repeatValueError)],
-        });
-      }
-
-      const nextRun = computeFirstRun({
-        hour,
-        minute,
-        repeatType: repeat,
-        repeatValue: repeatValue ?? null,
-        timezoneOffset,
-      });
-
-      const draft = {
-        name,
-        message,
-        hour,
-        minute,
-        timezoneOffset,
-        repeat,
-        repeatValue: repeatValue ?? null,
-        channelId,
-        nextRun,
-      };
-
-      saveCreateDraft(interaction.user.id, interaction.guildId, draft);
-
-      return answer(interaction, {
-        embeds: [createCreatePreviewEmbed(draft)],
-        components: buildCreatePreviewComponents(draft),
-      });
+      return interaction.showModal(buildCreateSetupModal());
     }
 
     if (sub === "edit") {

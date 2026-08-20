@@ -20,14 +20,22 @@ import {
   CREATE_UI,
   buildEventActionRows,
   buildCreatePreviewComponents,
-  buildCreateMessageModal,
+  buildCreateSetupModal,
+  buildMonthDayModal,
 } from "../lib/components.js";
 import {
   getCreateDraft,
   clearCreateDraft,
   touchCreateDraft,
+  saveCreateDraft,
 } from "../lib/drafts.js";
-import { computeFirstRun, validateRepeatValue } from "../lib/schedule.js";
+import {
+  computeFirstRun,
+  validateRepeatValue,
+  parseTimeInput,
+  parseTimezoneInput,
+  localCalendarParts,
+} from "../lib/schedule.js";
 import { PermissionFlagsBits, MessageFlags } from "discord.js";
 
 async function sendToChannel(client, channelId, content) {
@@ -215,15 +223,41 @@ async function handleCreateFlow(interaction) {
   const customId = interaction.customId;
 
   if (interaction.isModalSubmit() && customId === CREATE_UI.modal) {
-    const draft = getCreateDraft(interaction.user.id, interaction.guildId);
-    if (!draft) {
+    const label = interaction.fields.getTextInputValue("label").trim();
+    const message = interaction.fields.getTextInputValue("message");
+    const timeRaw = interaction.fields.getTextInputValue("time");
+    const tzRaw = interaction.fields.getTextInputValue("timezone");
+
+    const time = parseTimeInput(timeRaw);
+    if (typeof time === "string") {
       return interaction.reply({
-        content: "⏳ Preview expired. Run `/event create` again.",
+        embeds: [createErrorEmbed("Invalid time", time)],
         flags: MessageFlags.Ephemeral,
       });
     }
 
-    const message = interaction.fields.getTextInputValue("message");
+    const timezoneOffset = parseTimezoneInput(tzRaw);
+    if (typeof timezoneOffset === "string") {
+      return interaction.reply({
+        embeds: [createErrorEmbed("Invalid timezone", timezoneOffset)],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    if (!label) {
+      return interaction.reply({
+        embeds: [createErrorEmbed("Missing label", "Please enter an internal label.")],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    if (message.length > 2000) {
+      return interaction.reply({
+        embeds: [createErrorEmbed("Message too long", "Maximum length is 2000 characters.")],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
     if (
       mentionsEveryone(message) &&
       !interaction.memberPermissions?.has(PermissionFlagsBits.MentionEveryone)
@@ -239,17 +273,98 @@ async function handleCreateFlow(interaction) {
       });
     }
 
-    const updated = touchCreateDraft(interaction.user.id, interaction.guildId, { message });
+    const existing = getCreateDraft(interaction.user.id, interaction.guildId);
+    const repeat = existing?.repeat ?? "daily";
+    let repeatValue = existing?.repeatValue ?? null;
+    if (repeat === "weekly" && repeatValue == null) {
+      repeatValue = localCalendarParts(timezoneOffset).weekday;
+    }
+    if (repeat === "monthly" && repeatValue == null) {
+      repeatValue = localCalendarParts(timezoneOffset).monthDay;
+    }
+
+    const channelId = existing?.channelId ?? interaction.channelId;
+    const nextRun = computeFirstRun({
+      hour: time.hour,
+      minute: time.minute,
+      repeatType: repeat,
+      repeatValue,
+      timezoneOffset,
+    });
+
+    const draft = {
+      name: label,
+      message,
+      hour: time.hour,
+      minute: time.minute,
+      timezoneOffset,
+      repeat,
+      repeatValue,
+      channelId,
+      nextRun,
+    };
+
+    saveCreateDraft(interaction.user.id, interaction.guildId, draft);
+
+    if (interaction.message) {
+      await interaction.message.edit({
+        embeds: [createCreatePreviewEmbed(draft)],
+        components: buildCreatePreviewComponents(draft),
+      });
+      return interaction.reply({
+        content: "✅ Details updated.",
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    return interaction.reply({
+      embeds: [createCreatePreviewEmbed(draft)],
+      components: buildCreatePreviewComponents(draft),
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  if (interaction.isModalSubmit() && customId === CREATE_UI.monthModal) {
+    const draft = getCreateDraft(interaction.user.id, interaction.guildId);
+    if (!draft) {
+      return interaction.reply({
+        content: "⏳ Preview expired. Run `/event create` again.",
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    const day = Number(interaction.fields.getTextInputValue("monthday").trim());
+    if (!Number.isInteger(day) || day < 1 || day > 31) {
+      return interaction.reply({
+        embeds: [createErrorEmbed("Invalid day", "Enter a day from 1 to 31.")],
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    const nextRun = computeFirstRun({
+      hour: draft.hour,
+      minute: draft.minute,
+      repeatType: "monthly",
+      repeatValue: day,
+      timezoneOffset: draft.timezoneOffset,
+    });
+    const updated = touchCreateDraft(interaction.user.id, interaction.guildId, {
+      repeat: "monthly",
+      repeatValue: day,
+      nextRun,
+    });
+
     if (interaction.message) {
       await interaction.message.edit({
         embeds: [createCreatePreviewEmbed(updated)],
         components: buildCreatePreviewComponents(updated),
       });
       return interaction.reply({
-        content: "✅ Message updated in the preview.",
+        content: `✅ Month day set to **${day}**.`,
         flags: MessageFlags.Ephemeral,
       });
     }
+
     return interaction.reply({
       embeds: [createCreatePreviewEmbed(updated)],
       components: buildCreatePreviewComponents(updated),
@@ -307,15 +422,22 @@ async function handleCreateFlow(interaction) {
     }
 
     const repeat = interaction.values[0];
-    const error = validateRepeatValue(repeat, draft.repeatValue);
+    const local = localCalendarParts(draft.timezoneOffset);
+    let repeatValue = null;
+    if (repeat === "weekly") {
+      repeatValue = draft.repeat === "weekly" && draft.repeatValue != null
+        ? draft.repeatValue
+        : local.weekday;
+    } else if (repeat === "monthly") {
+      repeatValue = draft.repeat === "monthly" && draft.repeatValue != null
+        ? draft.repeatValue
+        : local.monthDay;
+    }
+
+    const error = validateRepeatValue(repeat, repeatValue);
     if (error) {
       return interaction.reply({
-        embeds: [
-          createErrorEmbed(
-            "Missing repeat_value",
-            `${error} Cancel and create again with the right value, or pick Daily / Once.`
-          ),
-        ],
+        embeds: [createErrorEmbed("Invalid repeat", error)],
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -324,11 +446,12 @@ async function handleCreateFlow(interaction) {
       hour: draft.hour,
       minute: draft.minute,
       repeatType: repeat,
-      repeatValue: draft.repeatValue,
+      repeatValue,
       timezoneOffset: draft.timezoneOffset,
     });
     const updated = touchCreateDraft(interaction.user.id, interaction.guildId, {
       repeat,
+      repeatValue,
       nextRun,
     });
     return interaction.update({
@@ -337,7 +460,36 @@ async function handleCreateFlow(interaction) {
     });
   }
 
-  if (interaction.isButton() && customId === CREATE_UI.editMessage) {
+  if (interaction.isStringSelectMenu() && customId === CREATE_UI.weekday) {
+    const draft = getCreateDraft(interaction.user.id, interaction.guildId);
+    if (!draft) {
+      return interaction.update({
+        content: "⏳ Preview expired. Run `/event create` again.",
+        embeds: [],
+        components: [],
+      });
+    }
+
+    const weekday = Number(interaction.values[0]);
+    const nextRun = computeFirstRun({
+      hour: draft.hour,
+      minute: draft.minute,
+      repeatType: "weekly",
+      repeatValue: weekday,
+      timezoneOffset: draft.timezoneOffset,
+    });
+    const updated = touchCreateDraft(interaction.user.id, interaction.guildId, {
+      repeat: "weekly",
+      repeatValue: weekday,
+      nextRun,
+    });
+    return interaction.update({
+      embeds: [createCreatePreviewEmbed(updated)],
+      components: buildCreatePreviewComponents(updated),
+    });
+  }
+
+  if (interaction.isButton() && customId === CREATE_UI.editDetails) {
     const draft = getCreateDraft(interaction.user.id, interaction.guildId);
     if (!draft) {
       return interaction.reply({
@@ -345,7 +497,18 @@ async function handleCreateFlow(interaction) {
         flags: MessageFlags.Ephemeral,
       });
     }
-    return interaction.showModal(buildCreateMessageModal(draft.message));
+    return interaction.showModal(buildCreateSetupModal(draft));
+  }
+
+  if (interaction.isButton() && customId === CREATE_UI.monthBtn) {
+    const draft = getCreateDraft(interaction.user.id, interaction.guildId);
+    if (!draft) {
+      return interaction.reply({
+        content: "⏳ Preview expired. Run `/event create` again.",
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+    return interaction.showModal(buildMonthDayModal(draft.repeatValue ?? 1));
   }
 
   if (interaction.isButton() && customId === CREATE_UI.cancel) {
@@ -366,6 +529,14 @@ async function handleCreateFlow(interaction) {
         content: "⏳ Preview expired. Run `/event create` again.",
         embeds: [],
         components: [],
+      });
+    }
+
+    const repeatError = validateRepeatValue(draft.repeat, draft.repeatValue);
+    if (repeatError) {
+      return interaction.reply({
+        embeds: [createErrorEmbed("Incomplete schedule", repeatError)],
+        flags: MessageFlags.Ephemeral,
       });
     }
 
