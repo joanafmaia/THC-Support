@@ -40,20 +40,44 @@ function isUnrecoverableInteractionError(error) {
   return UNRECOVERABLE_INTERACTION_CODES.has(error?.code);
 }
 
-/** Strip flags from edit payloads — ephemeral is fixed at first reply; re-sending flags breaks editReply. */
-function normalizeEditPayload(payload) {
-  if (payload == null || typeof payload === "string") return payload;
+function normalizePayload(payload) {
+  if (payload == null || typeof payload === "string") {
+    return { content: String(payload ?? "") };
+  }
   const { flags: _flags, ...rest } = payload;
   return rest;
 }
 
-async function respondToInteraction(interaction, payload) {
+/**
+ * Send or update the interaction response.
+ * If editReply fails (common with Invalid Webhook Token), fall back to followUp.
+ */
+async function respondToInteraction(interaction, payload, { ephemeral = true } = {}) {
+  const body = normalizePayload(payload);
+  const ephemeralFlag = ephemeral ? MessageFlags.Ephemeral : undefined;
+
   try {
-    if (interaction.deferred || interaction.replied) {
-      await interaction.editReply(normalizeEditPayload(payload));
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.reply({
+        ...body,
+        ...(ephemeralFlag != null ? { flags: ephemeralFlag } : {}),
+      });
       return;
     }
-    await interaction.reply(payload);
+
+    try {
+      await interaction.editReply(body);
+      return;
+    } catch (editError) {
+      logger.warn(
+        `editReply failed (${editError?.code ?? "?"}): ${editError?.message || editError}. Trying followUp…`,
+        "interactionCreate"
+      );
+      await interaction.followUp({
+        ...body,
+        ...(ephemeralFlag != null ? { flags: ephemeralFlag } : {}),
+      });
+    }
   } catch (error) {
     if (isUnrecoverableInteractionError(error)) {
       logger.warn(
@@ -128,30 +152,16 @@ client.on("interactionCreate", async (interaction) => {
 
   logger.info(
     `Received /${interaction.commandName} from ${interaction.user.tag} ` +
-      `(app=${interaction.applicationId}, guild=${interaction.guildId ?? "DM"})`,
+      `(interactionApp=${interaction.applicationId}, clientApp=${interaction.client.application?.id}, guild=${interaction.guildId ?? "DM"})`,
     "interactionCreate"
   );
 
-  // Real first reply (not defer) so the UI leaves "thinking…" even if later edits fail.
-  try {
-    await interaction.reply({
-      content: "⏳ A processar…",
-      flags: MessageFlags.Ephemeral,
-    });
-  } catch (error) {
-    if (isUnrecoverableInteractionError(error)) {
-      logger.warn(
-        `Could not acknowledge /${interaction.commandName} (${error.code}): ${error.message}. ` +
-          "Usually means another bot instance already responded, or the interaction expired.",
-        "interactionCreate"
-      );
-      return;
-    }
+  if (interaction.applicationId && interaction.client.application?.id
+    && interaction.applicationId !== interaction.client.application.id) {
     logger.error(
-      `Failed to reply /${interaction.commandName}: ${error?.message || error} (code=${error?.code ?? "?"})`,
+      `Application ID mismatch! interaction=${interaction.applicationId} client=${interaction.client.application.id}`,
       "interactionCreate"
     );
-    return;
   }
 
   if (isOnCooldown(interaction.user.id)) {
@@ -165,9 +175,46 @@ client.on("interactionCreate", async (interaction) => {
 
   const cmd = client.commands.get(interaction.commandName);
   if (!cmd) {
-    return respondToInteraction(interaction, {
-      content: "❌ Unknown command.",
-    });
+    return respondToInteraction(interaction, { content: "❌ Unknown command." });
+  }
+
+  // Acknowledge quickly for commands that will use editReply.
+  // /ping replies once itself — skip defer for that.
+  if (interaction.commandName !== "ping") {
+    try {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    } catch (error) {
+      if (isUnrecoverableInteractionError(error)) {
+        logger.warn(
+          `Could not acknowledge /${interaction.commandName} (${error.code}): ${error.message}. ` +
+            "Usually means another bot instance already responded, or the interaction expired.",
+          "interactionCreate"
+        );
+        return;
+      }
+      logger.error(
+        `Failed to defer /${interaction.commandName}: ${error?.message || error} (code=${error?.code ?? "?"})`,
+        "interactionCreate"
+      );
+      return;
+    }
+
+    // If editReply is broken (Invalid Webhook Token), fall back to followUp automatically.
+    const originalEditReply = interaction.editReply.bind(interaction);
+    interaction.editReply = async (payload) => {
+      try {
+        return await originalEditReply(normalizePayload(payload));
+      } catch (editError) {
+        logger.warn(
+          `editReply failed (${editError?.code ?? "?"}): ${editError?.message || editError}. Trying followUp…`,
+          "interactionCreate"
+        );
+        return interaction.followUp({
+          ...normalizePayload(payload),
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+    };
   }
 
   try {
@@ -179,6 +226,9 @@ client.on("interactionCreate", async (interaction) => {
         `Command /${interaction.commandName} aborted (${err.code}): ${err.message}`,
         "interactionCreate"
       );
+      await respondToInteraction(interaction, {
+        content: `❌ Command failed: ${err.message}`,
+      });
       return;
     }
     logger.error(

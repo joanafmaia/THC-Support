@@ -1,4 +1,4 @@
-import { SlashCommandBuilder } from "discord.js";
+import { SlashCommandBuilder, MessageFlags } from "discord.js";
 
 export default {
   data: new SlashCommandBuilder()
@@ -7,8 +7,10 @@ export default {
 
   async execute(interaction) {
     const started = Date.now();
-    return interaction.editReply(
-      `🏓 Pong! Latency: **${Date.now() - started}ms** | WS: **${interaction.client.ws.ping}ms**`
-    );
+    // Single reply — no editReply (edit path was leaving messages stuck on "A processar…").
+    await interaction.reply({
+      content: `🏓 Pong! Latency: **${Date.now() - started}ms** | WS: **${interaction.client.ws.ping}ms**`,
+      flags: MessageFlags.Ephemeral,
+    });
   },
 };
