@@ -35,7 +35,25 @@ if (!CONFIG.MONGODB_URI) {
 // so requests are kept short and retried at most once.
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
-  rest: { timeout: 8_000, retries: 1 },
+  rest: { timeout: 8_000, retries: 1, invalidRequestWarningInterval: 1 },
+});
+
+// A request can also sit in the rate-limit queue, where the timeout above does
+// not apply, so surface what the REST handler is waiting for.
+client.rest.on("rateLimited", (info) => {
+  logger.warn(
+    `Rate limited on ${info.method} ${info.route} — waiting ${info.timeToReset}ms ` +
+      `(global=${info.global}, limit=${info.limit})`,
+    "rest"
+  );
+});
+
+client.rest.on("invalidRequestWarning", (info) => {
+  logger.warn(
+    `Invalid requests: ${info.count} in the current window, ${info.remainingTime}ms left. ` +
+      "Too many of these get the IP temporarily blocked by Discord.",
+    "rest"
+  );
 });
 
 /** Discord codes where the interaction token is gone — do not retry replies. */
@@ -80,13 +98,17 @@ function installEditReplyFallback(interaction, label) {
     // Discord", so a stall can be attributed to the right side.
     logger.info(`Sending response for ${label}`, "interactionCreate");
     try {
-      return await editReply(body);
+      return await withTimeout(editReply(body), 6000, `editReply for ${label}`);
     } catch (error) {
       logger.warn(
         `editReply failed (${error?.code ?? "?"}): ${error?.message || error}. Trying followUp…`,
         "interactionCreate"
       );
-      return interaction.followUp({ ...body, flags: MessageFlags.Ephemeral });
+      return withTimeout(
+        interaction.followUp({ ...body, flags: MessageFlags.Ephemeral }),
+        6000,
+        `followUp for ${label}`
+      );
     }
   };
 }
