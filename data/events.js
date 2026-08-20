@@ -152,20 +152,6 @@ export async function getRecentHistory({ eventId = null, limit = 15 } = {}) {
     .toArray();
 }
 
-export async function listEventsForPreview() {
-  return eventsCollection()
-    .find({}, { projection: { id: 1, name: 1, message: 1, enabled: 1, next_run: 1 } })
-    .sort({ enabled: -1, next_run: 1 })
-    .toArray();
-}
-
-export async function getEventForPreview(id) {
-  return eventsCollection().findOne(
-    { id },
-    { projection: { id: 1, name: 1, message: 1, enabled: 1, next_run: 1 } }
-  );
-}
-
 export async function setEventEnabled(id, enabled) {
   const result = await eventsCollection().updateOne(
     { id },

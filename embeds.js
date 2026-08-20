@@ -185,38 +185,6 @@ export function relativeTime(iso) {
   return `<t:${unix}:R> · <t:${unix}:f>`;
 }
 
-export function createEventPreviewEmbed(event) {
-  return brandEmbed(event.enabled ? COLORS.success : COLORS.danger)
-    .setTitle(`Preview · #${event.id} ${event.name}`)
-    .setDescription(truncate(event.message, 4000))
-    .addFields(
-      {
-        name: "Status",
-        value: event.enabled ? "● Active" : "○ Disabled",
-        inline: true,
-      },
-      {
-        name: "Next run",
-        value: relativeTime(event.next_run),
-        inline: true,
-      }
-    );
-}
-
-export function createEventPreviewListEmbed(events) {
-  const embed = brandEmbed(COLORS.brand).setTitle("Event previews");
-
-  const lines = events.map((event) => {
-    const status = event.enabled ? "●" : "○";
-    const header = `${status} **#${event.id} ${event.name}** — ${relativeTime(event.next_run)}`;
-    const body = truncate(event.message.replace(/\s+/g, " ").trim(), 180);
-    return `${header}\n${body}`;
-  });
-
-  embed.setDescription(truncate(lines.join("\n\n"), 4000));
-  return embed;
-}
-
 export default {
   formatUtc,
   formatRepeat,
@@ -225,8 +193,6 @@ export default {
   createErrorEmbed,
   createEventEmbed,
   createEventListEmbed,
-  createEventPreviewEmbed,
-  createEventPreviewListEmbed,
   createHistoryEmbed,
   createCreatePreviewEmbed,
   createInfoEmbed,
