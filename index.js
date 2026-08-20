@@ -103,7 +103,7 @@ app.get("/stats", async (req, res) => {
   }
 });
 
-client.once("clientReady", async () => {
+client.once("ready", async () => {
   logger.info(`Bot ready! (${new Date().toISOString()})`);
   logger.info(`Application ID: ${client.application?.id}`, "startup");
 
