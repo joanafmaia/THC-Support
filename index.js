@@ -31,7 +31,12 @@ if (!CONFIG.MONGODB_URI) {
 }
 
 // Guilds is enough: the bot only answers interactions and sends messages.
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+// The REST defaults (15s per attempt, several retries) outlive an interaction,
+// so requests are kept short and retried at most once.
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds],
+  rest: { timeout: 8_000, retries: 1 },
+});
 
 /** Discord codes where the interaction token is gone — do not retry replies. */
 const UNRECOVERABLE_INTERACTION_CODES = new Set([
@@ -66,11 +71,14 @@ function normalizePayload(payload) {
  * (an expired or already-consumed token), retry as a follow-up so the user is
  * never left staring at "thinking…".
  */
-function installEditReplyFallback(interaction) {
+function installEditReplyFallback(interaction, label) {
   const editReply = interaction.editReply.bind(interaction);
 
   interaction.editReply = async (payload) => {
     const body = normalizePayload(payload);
+    // Marks the boundary between "still gathering data" and "talking to
+    // Discord", so a stall can be attributed to the right side.
+    logger.info(`Sending response for ${label}`, "interactionCreate");
     try {
       return await editReply(body);
     } catch (error) {
@@ -240,7 +248,7 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    installEditReplyFallback(interaction);
+    installEditReplyFallback(interaction, label);
   }
 
   const startedAt = Date.now();
