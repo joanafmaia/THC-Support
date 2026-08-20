@@ -1,10 +1,10 @@
-name: "CI/CD Testing"
+name: "CI"
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
 
 jobs:
   test:
@@ -12,13 +12,13 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [18.x, 20.x]
+        node-version: [20.x, 22.x]
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: "Use Node.js ${{ matrix.node-version }}"
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: "npm"
@@ -26,31 +26,21 @@ jobs:
       - name: "Install dependencies"
         run: npm ci
 
-      - name: "Syntax check"
-        run: |
-          node --check index.js
-          node --check scheduler.js
-          node --check commands/event.js
-          node --check config.js
-          node --check logger.js
-          node --check embeds.js
-          node --check backup.js
-          node --check rateLimit.js
-          node --check data/database.js
-          node --check data/events.js
+      - name: "Lint"
+        run: npm run lint
 
-      - name: "Lint code"
-        run: echo "Linting configuration would go here"
+      - name: "Test"
+        run: npm test
 
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20.x"
           cache: "npm"
       - name: "Install dependencies"
         run: npm ci
       - name: "Audit dependencies"
-        run: npm audit --audit-level=moderate || true
+        run: npm audit --audit-level=high

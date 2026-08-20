@@ -3,33 +3,43 @@ import { CONFIG } from "./config.js";
 
 const cooldowns = new Collection();
 const COOLDOWN_DURATION = CONFIG.RATE_LIMIT_COOLDOWN_MS;
+const PRUNE_EVERY = 100;
+
+let writesSincePrune = 0;
 
 /**
- * Check if user is on cooldown
+ * Drops entries that already expired, so the map does not grow with one
+ * permanent entry per user who ever ran a command.
  */
-export function isOnCooldown(userId) {
-  if (cooldowns.has(userId)) {
-    const expirationTime = cooldowns.get(userId) + COOLDOWN_DURATION;
-    if (Date.now() < expirationTime) {
-      return true;
+function prune(now) {
+  for (const [userId, startedAt] of cooldowns) {
+    if (now - startedAt >= COOLDOWN_DURATION) {
+      cooldowns.delete(userId);
     }
   }
-  return false;
 }
 
-/**
- * Add user to cooldown
- */
+export function isOnCooldown(userId) {
+  const startedAt = cooldowns.get(userId);
+  if (startedAt == null) return false;
+  return Date.now() - startedAt < COOLDOWN_DURATION;
+}
+
 export function addCooldown(userId) {
-  cooldowns.set(userId, Date.now());
+  const now = Date.now();
+  cooldowns.set(userId, now);
+
+  writesSincePrune += 1;
+  if (writesSincePrune >= PRUNE_EVERY) {
+    writesSincePrune = 0;
+    prune(now);
+  }
 }
 
-/**
- * Get remaining cooldown time in seconds
- */
 export function getRemainingCooldown(userId) {
-  const expirationTime = cooldowns.get(userId) + COOLDOWN_DURATION;
-  return Math.ceil((expirationTime - Date.now()) / 1000);
+  const startedAt = cooldowns.get(userId);
+  if (startedAt == null) return 0;
+  return Math.max(0, Math.ceil((startedAt + COOLDOWN_DURATION - Date.now()) / 1000));
 }
 
 export default {

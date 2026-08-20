@@ -7,7 +7,8 @@ A modern Discord bot to **schedule and manage automatic events** using slash com
 - ✅ **Slash Commands** (`/event create`, `/event list`, etc.)
 - ✅ **Database Scheduling** (MongoDB Atlas)
 - ✅ **Multiple Repeat Types** (once, daily, every2days, weekly, monthly)
-- ✅ **UTC Timezone** (globally compatible)
+- ✅ **Per-event timezone** (`timezone_offset`, stored and reused on every repeat)
+- ✅ **Restricted to server managers** (`Manage Server` permission)
 - ✅ **Modern Discord Embeds**
 - ✅ **HTTP Health Check**
 - ✅ **Professional Logging**
@@ -31,7 +32,7 @@ npm install
 Create a `.env` file in the project root:
 ```env
 DISCORD_TOKEN=your_discord_token_here
-MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/eos-support?retryWrites=true&w=majority
+MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/thc-support?retryWrites=true&w=majority
 PORT=3000
 LOG_LEVEL=info
 ```
@@ -42,7 +43,7 @@ LOG_LEVEL=info
 3. Em **Database Access**, cria um utilizador com password
 4. Em **Network Access**, adiciona `0.0.0.0/0` (permite ligação do Render)
 5. Clica **Connect → Drivers** e copia a connection string
-6. Substitui `<password>` e define o nome da base de dados (ex: `eos-support`)
+6. Substitui `<password>` e define o nome da base de dados (ex: `thc-support`)
 
 **How to get your Discord token:**
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
@@ -57,10 +58,17 @@ In Developer Portal, under "OAuth2 > URL Generator":
 
 Use the generated URL to add the bot to your server.
 
+> **Who can use the commands:** `/event` and `/backup` require the **Manage Server**
+> permission, because a scheduled event makes the bot post to any channel.
+> Scheduling a message containing `@everyone` or `@here` additionally requires the
+> author to have **Mention Everyone**. `/ping` is open to everyone.
+
 ### 5. **Start the Bot**
 ```bash
 npm start          # Production
 npm run dev        # Development (auto-reload)
+npm test           # Unit tests (scheduling maths)
+npm run lint       # ESLint
 ```
 
 ### 6. **Deploy no Render (Produção)**
@@ -107,6 +115,8 @@ Create a new scheduled event.
   - `weekly` - Weekly (requires repeat_value: 0-6)
   - `monthly` - Monthly (requires repeat_value: 1-31)
 - `repeat_value` (optional): Value for weekly/monthly
+- `timezone_offset` (optional): Your offset from UTC (e.g. `-3`). The hour/minute
+  above are read in that timezone, and every repeat keeps the same local time.
 - `channel_id` (optional): Channel ID (uses current channel if not specified)
 
 **Example:**
@@ -138,6 +148,14 @@ Delete an event.
 ### `/event run`
 Run an event manually now.
 
+### `/ping`
+Check that the bot is responding, without touching the database. Shows the
+gateway latency, how old the interaction was, and which instance answered —
+handy when diagnosing duplicate deployments.
+
+### `/backup now` / `/backup status`
+Create a snapshot of every event, or show the latest one.
+
 ---
 
 ## 🌐 HTTP Endpoints
@@ -164,24 +182,30 @@ The bot runs a web server on port 3000 with the following endpoints:
 
 ```
 thc-support-bot/
-├── index.js                     # Bot main file
-├── scheduler.js                 # Scheduling engine
+├── index.js                     # Bot main file, interaction handling, shutdown
+├── scheduler.js                 # Scheduling loop and event dispatch
 ├── config.js                    # Centralized configuration
 ├── logger.js                    # Logging system
 ├── embeds.js                    # Discord embed helpers
-├── backup.js                    # Database backup system
-├── rateLimit.js                 # Rate limiting
+├── backup.js                    # Snapshot scheduling
+├── rateLimit.js                 # Per-user cooldown
+├── lib/
+│   └── schedule.js              # Pure date maths (timezones, repeats)
 ├── commands/
-│   └── event.js                 # /event command (create, list, etc.)
+│   ├── event.js                 # /event command (create, list, etc.)
+│   ├── backup.js                # /backup command
+│   └── ping.js                  # /ping health check
 ├── data/
 │   ├── database.js              # MongoDB connection
-│   └── events.js                # Event CRUD operations
-├── backups/                     # Daily JSON backups (auto-generated)
+│   └── events.js                # Event and backup persistence
+├── test/
+│   └── schedule.test.js         # Unit tests for the date maths
 ├── .github/
 │   └── workflows/
-│       └── ci-cd.yml            # GitHub Actions CI/CD
+│       └── ci-cd.yml            # GitHub Actions (lint, test, audit)
 ├── .env                         # Environment variables (don't share!)
 ├── .env.example                 # .env template
+├── eslint.config.mjs            # Lint rules
 ├── render.yaml                  # Render Blueprint (deploy)
 ├── .node-version                # Node.js version for Render
 ├── package.json                 # Dependencies
@@ -200,12 +224,18 @@ Os eventos são guardados no **MongoDB Atlas** (coleção `events`):
 | `name` | String | Event name |
 | `channel_id` | String | Discord channel ID |
 | `message` | String | Message to send |
-| `next_run` | String | Next execution (ISO 8601) |
+| `next_run` | String | Next execution (ISO 8601, UTC) |
 | `repeat_type` | String | Repeat type |
 | `repeat_value` | Number | Value for weekly/monthly |
+| `timezone_offset` | Number | Author's offset from UTC, reused on every repeat |
 | `enabled` | Boolean | Active/inactive |
+| `failed_attempts` | Number | Consecutive send failures (auto-disables at `MAX_SEND_ATTEMPTS`) |
+| `last_error` | String | Reason of the last failed send |
 | `created_at` | String | Creation timestamp |
 | `updated_at` | String | Update timestamp |
+
+Snapshots are stored in the `backups` collection, keeping the most recent
+`BACKUP_KEEP` documents.
 
 ---
 
@@ -214,15 +244,17 @@ Os eventos são guardados no **MongoDB Atlas** (coleção `events`):
 ```env
 # Required
 DISCORD_TOKEN=your_token_here
-MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/eos-support
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/thc-support
 
 # Optional
 PORT=3000                           # HTTP server port (default: 3000)
 LOG_LEVEL=info                      # Levels: error, warn, info, debug
-BACKUP_ENABLED=true                 # Enable daily database backups
+BACKUP_ENABLED=true                 # Set to "false" to disable snapshots
 BACKUP_INTERVAL_HOURS=24            # Backup frequency (hours)
+BACKUP_KEEP=14                      # How many snapshots to keep
 RATE_LIMIT_COOLDOWN_MS=5000         # Cooldown between commands (ms)
 CHECK_INTERVAL_MS=60000             # Scheduler interval (ms)
+MAX_SEND_ATTEMPTS=5                 # Failures before an event is auto-disabled
 STATS_TOKEN=                        # Optional token for /stats endpoint
 ```
 
@@ -230,21 +262,34 @@ STATS_TOKEN=                        # Optional token for /stats endpoint
 
 ## 💾 Backups
 
-O bot cria backups diários em JSON:
-- **Localização:** pasta `./backups/`
-- **Nome:** `events-YYYY-MM-DD.json`
-- **Frequência:** Uma vez por dia (configurável via `BACKUP_INTERVAL_HOURS`)
+Snapshots are written to the **`backups` collection in MongoDB**, not to disk —
+Render wipes the filesystem on every deploy, so local files did not survive.
 
-Para restaurar um backup, importa o JSON manualmente na coleção `events` do MongoDB Atlas.
+- **Frequency:** every `BACKUP_INTERVAL_HOURS` (default 24), plus on startup
+- **Retention:** the most recent `BACKUP_KEEP` snapshots (default 14)
+- **On demand:** `/backup now`, and `/backup status` to inspect the latest one
+
+To restore, copy the `events` array from a snapshot document back into the
+`events` collection.
 
 ---
 
 ## 🐛 Troubleshooting
 
 ### "Bot doesn't respond to commands"
-1. Check if the bot has the `applications.commands` permission
-2. Try reloading Discord (CTRL+R)
-3. Check if DISCORD_TOKEN and MONGODB_URI are correct in `.env` or no Render
+1. Check that you have the **Manage Server** permission — `/event` and `/backup`
+   are restricted, so they are hidden from members without it
+2. Try `/ping` first: it answers without touching the database
+3. Try reloading Discord (CTRL+R)
+4. Check if DISCORD_TOKEN and MONGODB_URI are correct in `.env` or no Render
+
+### "Unknown interaction" / "Invalid Webhook Token" in the logs
+Discord invalidated the interaction before the bot answered. Usual causes:
+1. **Two instances running with the same token** (for example a local copy plus
+   Render). Run `/ping` and compare the `instance` it reports with the one in the
+   Render logs — if they differ, a second bot is connected
+2. The interaction arrived late. `/ping` prints its age; above ~3000ms the token
+   is already dead on arrival and the host is too slow or was asleep
 
 ### "Messages are not being sent"
 1. Check if the bot has `Send Messages` permission in the channel
@@ -260,9 +305,15 @@ Para restaurar um backup, importa o JSON manualmente na coleção `events` do Mo
 - Reduce your message content or split into multiple events
 
 ### "Events are not being scheduled"
-1. Check if the hour/minute are in UTC
+1. Times are stored in UTC. If you passed `timezone_offset`, the hour you typed
+   is your local one — check `/event list`, which always shows UTC
 2. Check if the channel_id exists and is valid
 3. Test with `/event due` to see if there are overdue events
+
+### "An event stopped firing"
+After `MAX_SEND_ATTEMPTS` consecutive failures the event is disabled to avoid
+retrying forever. `/event list` shows it as disabled; the reason is in
+`last_error`. Fix the cause (usually channel permissions) and `/event enable` it.
 
 ---
 
@@ -312,18 +363,13 @@ Logs are formatted like this:
 npm run dev
 ```
 
-### Check Syntax
+### Tests and Lint
 ```bash
-node --check index.js
-node --check scheduler.js
-node --check commands/event.js
-node --check config.js
-node --check logger.js
-node --check embeds.js
-node --check backup.js
-node --check rateLimit.js
-          node --check data/events.js
+npm test           # unit tests for the scheduling maths
+npm run lint       # ESLint
 ```
+
+Both run automatically on every push through GitHub Actions.
 
 ---
 

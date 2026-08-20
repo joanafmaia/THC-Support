@@ -1,7 +1,7 @@
 # Blueprint Render — https://render.com/docs/blueprint-spec
 services:
   - type: web
-    name: eos-support-bot
+    name: thc-support
     runtime: node
     plan: free
     buildCommand: npm install

@@ -1,52 +1,84 @@
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
-import { exportAllEvents } from "./data/events.js";
+import {
+  countBackups,
+  exportAllEvents,
+  getLatestBackup,
+  pruneBackups,
+  saveBackup,
+} from "./data/events.js";
 import { logger } from "./logger.js";
+import { CONFIG } from "./config.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BACKUP_DIR = path.join(__dirname, "backups");
+let intervalHandle = null;
 const backupStatus = {
   lastBackupAt: null,
-  lastBackupPath: null,
+  lastEventCount: null,
   lastError: null,
 };
 
-if (!fs.existsSync(BACKUP_DIR)) {
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
-}
-
 /**
- * Export all events to a JSON backup file
+ * Snapshots every event into the `backups` collection.
+ * Returns the snapshot summary, or throws so callers can report the failure.
  */
 export async function backupDatabase() {
   try {
-    const timestamp = new Date().toISOString().split("T")[0];
-    const backupPath = path.join(BACKUP_DIR, `events-${timestamp}.json`);
+    const events = await exportAllEvents();
+    const createdAt = new Date().toISOString();
 
-    if (!fs.existsSync(backupPath)) {
-      const events = await exportAllEvents();
-      fs.writeFileSync(backupPath, JSON.stringify(events, null, 2), "utf-8");
-      logger.info(`Database backed up: ${backupPath}`, "backup");
-    }
+    await saveBackup({ events, createdAt });
+    const removed = await pruneBackups(CONFIG.BACKUP_KEEP);
 
-    backupStatus.lastBackupAt = new Date().toISOString();
-    backupStatus.lastBackupPath = backupPath;
+    backupStatus.lastBackupAt = createdAt;
+    backupStatus.lastEventCount = events.length;
     backupStatus.lastError = null;
+
+    logger.info(
+      `Backed up ${events.length} events` + (removed ? ` (pruned ${removed} old snapshots)` : ""),
+      "backup"
+    );
+
+    return { createdAt, eventCount: events.length };
   } catch (error) {
     backupStatus.lastError = error.message;
     logger.error(`Backup failed: ${error.message}`, "backup");
+    throw error;
   }
 }
 
-/**
- * Start automatic backups
- */
 export function startBackupSchedule(intervalHours = 24) {
-  backupDatabase();
+  if (!CONFIG.BACKUP_ENABLED) {
+    logger.info("Backups disabled (BACKUP_ENABLED=false)", "backup");
+    return;
+  }
 
-  setInterval(() => backupDatabase(), intervalHours * 60 * 60 * 1000);
+  if (intervalHandle) return;
+
+  backupDatabase().catch(() => {
+    // Already logged; the schedule should still start.
+  });
+
+  intervalHandle = setInterval(() => {
+    backupDatabase().catch(() => {});
+  }, intervalHours * 60 * 60 * 1000);
+
   logger.info(`Database backups scheduled every ${intervalHours} hours`, "backup");
+}
+
+export function stopBackupSchedule() {
+  if (!intervalHandle) return;
+  clearInterval(intervalHandle);
+  intervalHandle = null;
+  logger.info("Backup schedule stopped", "backup");
+}
+
+export async function getBackupStatus() {
+  const [latest, total] = await Promise.all([getLatestBackup(), countBackups()]);
+
+  return {
+    ...backupStatus,
+    storedBackups: total,
+    latestStoredAt: latest?.created_at ?? null,
+    latestEventCount: latest?.event_count ?? null,
+  };
 }
 
 export function getLastBackupStatus() {
@@ -56,5 +88,7 @@ export function getLastBackupStatus() {
 export default {
   backupDatabase,
   startBackupSchedule,
+  stopBackupSchedule,
+  getBackupStatus,
   getLastBackupStatus,
 };

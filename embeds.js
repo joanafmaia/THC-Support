@@ -2,7 +2,9 @@ import { EmbedBuilder } from "discord.js";
 import { CONFIG } from "./config.js";
 
 export function formatUtc(dateString) {
-  return `${new Date(dateString).toLocaleString("en-GB", { timeZone: "UTC" })} (UTC)`;
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return "unknown";
+  return `${date.toLocaleString("en-GB", { timeZone: "UTC" })} (UTC)`;
 }
 
 function formatRepeat(event) {

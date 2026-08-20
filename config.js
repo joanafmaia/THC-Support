@@ -17,8 +17,7 @@ export const CONFIG = {
 
   // Scheduler
   CHECK_INTERVAL_MS: Number(process.env.CHECK_INTERVAL_MS) || 60_000, // 1 minute
-  RETRY_ATTEMPTS: 3,
-  RETRY_DELAY: 5000, // 5 seconds
+  MAX_SEND_ATTEMPTS: Number(process.env.MAX_SEND_ATTEMPTS) || 5,
 
   // Discord Message
   MAX_MESSAGE_LENGTH: 2000,
@@ -28,7 +27,9 @@ export const CONFIG = {
   LOG_LEVEL: process.env.LOG_LEVEL || "info",
 
   // Backups
+  BACKUP_ENABLED: process.env.BACKUP_ENABLED !== "false",
   BACKUP_INTERVAL_HOURS: Number(process.env.BACKUP_INTERVAL_HOURS) || 24,
+  BACKUP_KEEP: Number(process.env.BACKUP_KEEP) || 14,
 
   // Rate limiting
   RATE_LIMIT_COOLDOWN_MS: Number(process.env.RATE_LIMIT_COOLDOWN_MS) || 5000,

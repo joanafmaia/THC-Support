@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 
 import express from "express";
 import { Client, GatewayIntentBits, Collection, MessageFlags } from "discord.js";
@@ -8,10 +8,10 @@ import { CONFIG } from "./config.js";
 import eventCommand from "./commands/event.js";
 import backupCommand from "./commands/backup.js";
 import pingCommand from "./commands/ping.js";
-import { startScheduler, getDueEvents } from "./scheduler.js";
-import { startBackupSchedule } from "./backup.js";
+import { startScheduler, stopScheduler, getDueEvents } from "./scheduler.js";
+import { startBackupSchedule, stopBackupSchedule } from "./backup.js";
 import { isOnCooldown, addCooldown, getRemainingCooldown } from "./rateLimit.js";
-import { connectDatabase } from "./data/database.js";
+import { connectDatabase, closeDatabase } from "./data/database.js";
 import { countEvents } from "./data/events.js";
 
 const TOKEN = CONFIG.DISCORD_TOKEN;
@@ -30,9 +30,8 @@ if (!CONFIG.MONGODB_URI) {
   process.exit(1);
 }
 
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
-});
+// Guilds is enough: the bot only answers interactions and sends messages.
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 /** Discord codes where the interaction token is gone — do not retry replies. */
 const UNRECOVERABLE_INTERACTION_CODES = new Set([
@@ -63,35 +62,39 @@ function normalizePayload(payload) {
 }
 
 /**
- * Send or update the interaction response.
- * If editReply fails (common with Invalid Webhook Token), fall back to followUp.
+ * Commands answer with editReply after the defer. When Discord rejects the edit
+ * (an expired or already-consumed token), retry as a follow-up so the user is
+ * never left staring at "thinking…".
  */
-async function respondToInteraction(interaction, payload, { ephemeral = true } = {}) {
+function installEditReplyFallback(interaction) {
+  const editReply = interaction.editReply.bind(interaction);
+
+  interaction.editReply = async (payload) => {
+    const body = normalizePayload(payload);
+    try {
+      return await editReply(body);
+    } catch (error) {
+      logger.warn(
+        `editReply failed (${error?.code ?? "?"}): ${error?.message || error}. Trying followUp…`,
+        "interactionCreate"
+      );
+      return interaction.followUp({ ...body, flags: MessageFlags.Ephemeral });
+    }
+  };
+}
+
+/** Answers the interaction whether or not it was already acknowledged. */
+async function respondToInteraction(interaction, payload) {
   const body = normalizePayload(payload);
-  const ephemeralFlag = ephemeral ? MessageFlags.Ephemeral : undefined;
 
   try {
     if (!interaction.deferred && !interaction.replied) {
-      await interaction.reply({
-        ...body,
-        ...(ephemeralFlag != null ? { flags: ephemeralFlag } : {}),
-      });
+      await interaction.reply({ ...body, flags: MessageFlags.Ephemeral });
       return;
     }
 
-    try {
-      await interaction.editReply(body);
-      return;
-    } catch (editError) {
-      logger.warn(
-        `editReply failed (${editError?.code ?? "?"}): ${editError?.message || editError}. Trying followUp…`,
-        "interactionCreate"
-      );
-      await interaction.followUp({
-        ...body,
-        ...(ephemeralFlag != null ? { flags: ephemeralFlag } : {}),
-      });
-    }
+    // editReply already falls back to followUp for deferred interactions.
+    await interaction.editReply(body);
   } catch (error) {
     if (isUnrecoverableInteractionError(error)) {
       logger.warn(
@@ -112,16 +115,22 @@ client.commands.set(pingCommand.data.name, pingCommand);
 client.commands.set(eventCommand.data.name, eventCommand);
 client.commands.set(backupCommand.data.name, backupCommand);
 
+/** Constant-time compare so the token cannot be guessed byte by byte. */
+function isValidStatsToken(provided) {
+  if (typeof provided !== "string") return false;
+
+  const expected = Buffer.from(CONFIG.STATS_TOKEN);
+  const actual = Buffer.from(provided);
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
 const app = express();
 app.get("/", (req, res) => res.send("✅ THC Support Bot is running!"));
 app.get("/health", (req, res) => res.json({ status: "ok", uptime: process.uptime() }));
 
 app.get("/stats", async (req, res) => {
-  if (CONFIG.STATS_TOKEN) {
-    const provided = req.headers["x-stats-token"];
-    if (provided !== CONFIG.STATS_TOKEN) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
+  if (CONFIG.STATS_TOKEN && !isValidStatsToken(req.headers["x-stats-token"])) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
   try {
     const { total, active } = await countEvents();
@@ -154,10 +163,14 @@ client.once("clientReady", async () => {
   startScheduler(client);
   startBackupSchedule(CONFIG.BACKUP_INTERVAL_HOURS);
 
-  const overdue = await getDueEvents(new Date().toISOString());
-  if (overdue.length > 0) {
-    logger.warn(`Found ${overdue.length} overdue events on startup`, "startup");
-    logger.info("Overdue events will be processed by the scheduler", "startup");
+  try {
+    const overdue = await getDueEvents(new Date().toISOString());
+    if (overdue.length > 0) {
+      logger.warn(`Found ${overdue.length} overdue events on startup`, "startup");
+      logger.info("Overdue events will be processed by the scheduler", "startup");
+    }
+  } catch (error) {
+    logger.error(`Could not check overdue events: ${error.message}`, "startup");
   }
 });
 
@@ -227,22 +240,7 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    // If editReply is broken (Invalid Webhook Token), fall back to followUp automatically.
-    const originalEditReply = interaction.editReply.bind(interaction);
-    interaction.editReply = async (payload) => {
-      try {
-        return await originalEditReply(normalizePayload(payload));
-      } catch (editError) {
-        logger.warn(
-          `editReply failed (${editError?.code ?? "?"}): ${editError?.message || editError}. Trying followUp…`,
-          "interactionCreate"
-        );
-        return interaction.followUp({
-          ...normalizePayload(payload),
-          flags: MessageFlags.Ephemeral,
-        });
-      }
-    };
+    installEditReplyFallback(interaction);
   }
 
   const startedAt = Date.now();
@@ -272,11 +270,55 @@ client.on("interactionCreate", async (interaction) => {
 
 client.on("error", (error) => logger.error(`Discord client error: ${error.message}`, "discord"));
 process.on("unhandledRejection", (reason) => logger.error(`Unhandled rejection: ${reason}`, "process"));
+process.on("uncaughtException", (error) => {
+  logger.error(`Uncaught exception: ${error?.stack || error}`, "process");
+  shutdown("uncaughtException", 1);
+});
+
+let httpServer;
+let shuttingDown = false;
+
+/**
+ * Release the gateway session and database before the process dies.
+ * Without this, a redeploy leaves the old instance connected with the same
+ * token, and both instances race to answer the same interactions.
+ */
+async function shutdown(reason, exitCode = 0) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info(`Shutting down (${reason})…`, "shutdown");
+
+  stopScheduler();
+  stopBackupSchedule();
+
+  const steps = [
+    ["Discord client", async () => client.destroy()],
+    ["HTTP server", async () => httpServer && new Promise((resolve) => httpServer.close(resolve))],
+    ["MongoDB", closeDatabase],
+  ];
+
+  for (const [name, close] of steps) {
+    try {
+      await withTimeout(Promise.resolve(close()), 5000, `closing ${name}`);
+      logger.info(`${name} closed`, "shutdown");
+    } catch (error) {
+      logger.warn(`Failed to close ${name}: ${error?.message || error}`, "shutdown");
+    }
+  }
+
+  process.exit(exitCode);
+}
+
+for (const signal of ["SIGTERM", "SIGINT"]) {
+  process.on(signal, () => shutdown(signal));
+}
 
 async function main() {
   try {
     await connectDatabase();
-    app.listen(PORT, "0.0.0.0", () => logger.info(`Web server online on port ${PORT}`));
+    httpServer = app.listen(PORT, "0.0.0.0", () =>
+      logger.info(`Web server online on port ${PORT}`)
+    );
     await client.login(TOKEN);
   } catch (error) {
     logger.error(`Startup failed: ${error.message}`, "startup");

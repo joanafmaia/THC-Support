@@ -17,6 +17,18 @@ const LEVEL_PRIORITY = {
   debug: 3,
 };
 
+const DEFAULT_LEVEL = "info";
+
+/** An unknown LOG_LEVEL used to silence every log; fall back instead. */
+function currentThreshold() {
+  const configured = String(CONFIG.LOG_LEVEL || "").trim().toLowerCase();
+  return LEVEL_PRIORITY[configured] ?? LEVEL_PRIORITY[DEFAULT_LEVEL];
+}
+
+function enabled(level) {
+  return currentThreshold() >= LEVEL_PRIORITY[level];
+}
+
 function formatTimestamp(date = new Date()) {
   return date.toISOString();
 }
@@ -30,25 +42,25 @@ function formatMessage(level, message, context = null) {
 
 export const logger = {
   error(message, context) {
-    if (LEVEL_PRIORITY[CONFIG.LOG_LEVEL] >= LEVEL_PRIORITY.error) {
+    if (enabled("error")) {
       console.error(formatMessage("error", message, context));
     }
   },
 
   warn(message, context) {
-    if (LEVEL_PRIORITY[CONFIG.LOG_LEVEL] >= LEVEL_PRIORITY.warn) {
+    if (enabled("warn")) {
       console.warn(formatMessage("warn", message, context));
     }
   },
 
   info(message, context) {
-    if (LEVEL_PRIORITY[CONFIG.LOG_LEVEL] >= LEVEL_PRIORITY.info) {
+    if (enabled("info")) {
       console.log(formatMessage("info", message, context));
     }
   },
 
   debug(message, context) {
-    if (LEVEL_PRIORITY[CONFIG.LOG_LEVEL] >= LEVEL_PRIORITY.debug) {
+    if (enabled("debug")) {
       console.log(formatMessage("debug", message, context));
     }
   },

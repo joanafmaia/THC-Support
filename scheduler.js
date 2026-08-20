@@ -9,147 +9,145 @@ import {
 } from "./data/events.js";
 import { logger } from "./logger.js";
 import { CONFIG } from "./config.js";
+import { computeFollowingRun } from "./lib/schedule.js";
+
+let intervalHandle = null;
+let cycleRunning = false;
 
 /**
- * Adds a new event to the database
+ * Adds a new event to the database.
+ * Errors propagate so the command can tell the user what went wrong.
  */
-export async function addEvent(name, channelId, message, nextRun, repeatType, repeatValue = null) {
-  try {
-    const doc = await createEvent({
-      name,
-      channelId,
-      message,
-      nextRun,
-      repeatType,
-      repeatValue,
-    });
-    logger.info(`Event added: ${name} (ID: ${doc.id})`, "scheduler");
-    return doc.id;
-  } catch (error) {
-    logger.error(`Error adding event: ${error.message}`, "scheduler");
-    return null;
-  }
+export async function addEvent({
+  name,
+  channelId,
+  message,
+  nextRun,
+  repeatType,
+  repeatValue = null,
+  timezoneOffset = 0,
+}) {
+  const doc = await createEvent({
+    name,
+    channelId,
+    message,
+    nextRun,
+    repeatType,
+    repeatValue,
+    timezoneOffset,
+  });
+  logger.info(`Event added: ${name} (ID: ${doc.id})`, "scheduler");
+  return doc.id;
 }
 
-/**
- * Deletes an event
- */
 export async function deleteEvent(eventId) {
-  try {
-    await deleteEventById(eventId);
-    logger.info(`Event deleted (ID: ${eventId})`, "scheduler");
-  } catch (error) {
-    logger.error(`Error deleting event: ${error.message}`, "scheduler");
-  }
+  await deleteEventById(eventId);
+  logger.info(`Event deleted (ID: ${eventId})`, "scheduler");
 }
 
-/**
- * Returns all due events (next_run <= now)
- */
 export async function getDueEvents(untilTime = new Date().toISOString()) {
-  try {
-    return await fetchDueEvents(untilTime);
-  } catch (error) {
-    logger.error(`Error fetching due events: ${error.message}`, "scheduler");
-    return [];
-  }
+  return fetchDueEvents(untilTime);
+}
+
+export async function getNextEvent() {
+  return fetchNextEvent();
 }
 
 /**
- * Calculates the next execution time based on the repeat type.
- * Uses the scheduled event time (eventTime), not "now", to avoid drift.
- */
-function calculateNextRun(eventTime, repeatType, repeatValue) {
-  const next = new Date(eventTime);
-
-  switch (repeatType) {
-    case "once":
-      return null;
-
-    case "daily":
-      next.setUTCDate(next.getUTCDate() + 1);
-      break;
-
-    case "every2days":
-      next.setUTCDate(next.getUTCDate() + 2);
-      break;
-
-    case "weekly": {
-      const targetDay = Number(repeatValue);
-      const currentDay = next.getUTCDay();
-      let addDays = (targetDay - currentDay + 7) % 7;
-      if (addDays === 0) addDays = 7;
-      next.setUTCDate(next.getUTCDate() + addDays);
-      break;
-    }
-
-    case "monthly": {
-      next.setUTCMonth(next.getUTCMonth() + 1);
-      const lastDay = new Date(Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0)).getUTCDate();
-      const dayToSet = Math.min(Number(repeatValue), lastDay);
-      next.setUTCDate(dayToSet);
-      break;
-    }
-
-    default:
-      next.setUTCDate(next.getUTCDate() + 1);
-  }
-
-  return next.toISOString();
-}
-
-/**
- * Starts the scheduler loop (checks every minute)
+ * Starts the scheduler loop. Overlapping cycles are skipped, so a slow
+ * database can never cause the same event to be sent twice.
  */
 export function startScheduler(client) {
+  if (intervalHandle) return;
+
   logger.info("Scheduler started (UTC)", "scheduler");
 
-  setInterval(async () => {
-    const now = new Date();
-    const dueEvents = await getDueEvents(now.toISOString());
-    if (!dueEvents.length) return;
+  intervalHandle = setInterval(async () => {
+    if (cycleRunning) {
+      logger.warn("Previous scheduler cycle still running, skipping this tick", "scheduler");
+      return;
+    }
 
-    for (const event of dueEvents) {
-      const sentOk = await sendEventMessage(client, event, now);
-      if (!sentOk) {
-        continue;
-      }
-
-      const eventTime = new Date(event.next_run);
-
-      if (event.repeat_type !== "once") {
-        const nextRun = calculateNextRun(eventTime, event.repeat_type, event.repeat_value);
-        await rescheduleEvent(event.id, nextRun);
-        logger.info(`${event.name} rescheduled to: ${nextRun}`, "scheduler");
-      } else {
-        await disableEventAfterRun(event.id);
-      }
+    cycleRunning = true;
+    try {
+      await runCycle(client);
+    } catch (error) {
+      logger.error(`Scheduler cycle failed: ${error?.message || error}`, "scheduler");
+    } finally {
+      cycleRunning = false;
     }
   }, CONFIG.CHECK_INTERVAL_MS);
 }
 
+export function stopScheduler() {
+  if (!intervalHandle) return;
+  clearInterval(intervalHandle);
+  intervalHandle = null;
+  logger.info("Scheduler stopped", "scheduler");
+}
+
+async function runCycle(client) {
+  const now = new Date();
+  const dueEvents = await fetchDueEvents(now.toISOString());
+  if (!dueEvents.length) return;
+
+  for (const event of dueEvents) {
+    const sent = await sendEventMessage(client, event, now);
+
+    if (!sent) {
+      await handleFailedSend(event);
+      continue;
+    }
+
+    if (event.repeat_type === "once") {
+      await disableEventAfterRun(event.id);
+      continue;
+    }
+
+    const nextRun = computeFollowingRun({
+      nextRun: event.next_run,
+      repeatType: event.repeat_type,
+      repeatValue: event.repeat_value,
+      timezoneOffset: event.timezone_offset ?? 0,
+      now,
+    });
+
+    await rescheduleEvent(event.id, nextRun);
+    logger.info(`${event.name} rescheduled to: ${nextRun}`, "scheduler");
+  }
+}
+
 /**
- * Sends the event message to Discord
- * Returns true if sent, false if failed.
+ * A due event that keeps failing would be retried every cycle forever,
+ * so it gets disabled once the attempt limit is reached.
  */
+async function handleFailedSend(event) {
+  const attempts = (event.failed_attempts ?? 0) + 1;
+
+  if (attempts < CONFIG.MAX_SEND_ATTEMPTS) {
+    logger.warn(
+      `Event ${event.id} (${event.name}) failed ${attempts}/${CONFIG.MAX_SEND_ATTEMPTS} times, will retry`,
+      "scheduler"
+    );
+    return;
+  }
+
+  await disableEventAfterRun(event.id);
+  logger.error(
+    `Event ${event.id} (${event.name}) disabled after ${attempts} failed attempts`,
+    "scheduler"
+  );
+}
+
 async function sendEventMessage(client, event, now) {
   try {
     const channel = await client.channels.fetch(event.channel_id);
-    if (!channel) {
-      logger.error(`Channel ${event.channel_id} not found for event: ${event.name}`, "scheduler");
-      await recordSendAttempt(event.id, {
-        success: false,
-        error: "Channel not found",
-        attemptedAt: now.toISOString(),
-      });
-      return false;
+    if (!channel?.isTextBased()) {
+      throw new Error(`Channel ${event.channel_id} is not a text channel`);
     }
 
     await channel.send(event.message);
-    await recordSendAttempt(event.id, {
-      success: true,
-      attemptedAt: now.toISOString(),
-    });
+    await recordSendAttempt(event.id, { success: true, attemptedAt: now.toISOString() });
     logger.info(`Event sent: ${event.name}`, "scheduler");
     return true;
   } catch (error) {
@@ -163,21 +161,6 @@ async function sendEventMessage(client, event, now) {
   }
 }
 
-/**
- * Returns the next scheduled event (future)
- */
-export async function getNextEvent() {
-  try {
-    return await fetchNextEvent();
-  } catch (error) {
-    logger.error(`Error fetching next event: ${error.message}`, "scheduler");
-    return null;
-  }
-}
-
-/**
- * Formats an event for display
- */
 export function formatEvent(event) {
   return `📅 **${event.name}** | 🔗 <#${event.channel_id}> | ⏰ ${event.next_run} | 🔄 ${event.repeat_type}${event.repeat_value != null ? ` (${event.repeat_value})` : ""}`;
 }

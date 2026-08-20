@@ -4,3 +4,10 @@ node_modules/
 .DS_Store
 *.log
 npm-debug.log*
+
+# Local snapshots (backups now live in MongoDB)
+backups/
+
+# Editors
+.idea/
+.vscode/

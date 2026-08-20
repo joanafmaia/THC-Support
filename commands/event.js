@@ -24,66 +24,11 @@ import {
   getNextEvent,
   getDueEvents,
 } from "../scheduler.js";
-
-function isValidRepeat(type) {
-  return ["once", "daily", "every2days", "weekly", "monthly"].includes(type);
-}
-
-function computeInitialNextRunUTC({ hour, minute, repeatType, repeatValue }) {
-  const now = new Date();
-
-  let next = new Date(
-    Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      now.getUTCDate(),
-      hour,
-      minute,
-      0,
-      0
-    )
-  );
-
-  if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
-
-  if (repeatType === "weekly") {
-    const targetDow = Number(repeatValue);
-    const currentDow = next.getUTCDay();
-    let addDays = (targetDow - currentDow + 7) % 7;
-    if (addDays === 0) addDays = 7;
-    next.setUTCDate(next.getUTCDate() + addDays);
-  }
-
-  if (repeatType === "monthly") {
-    const targetDom = Number(repeatValue);
-    const y = next.getUTCFullYear();
-    const m = next.getUTCMonth();
-    const lastDayThisMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
-    let candidate = new Date(
-      Date.UTC(y, m, Math.min(targetDom, lastDayThisMonth), hour, minute, 0, 0)
-    );
-
-    if (candidate <= now) {
-      const nextMonth = new Date(Date.UTC(y, m + 1, 1));
-      const lastDayNextMonth = new Date(Date.UTC(nextMonth.getUTCFullYear(), nextMonth.getUTCMonth() + 1, 0)).getUTCDate();
-      candidate = new Date(
-        Date.UTC(nextMonth.getUTCFullYear(), nextMonth.getUTCMonth(), Math.min(targetDom, lastDayNextMonth), hour, minute, 0, 0)
-      );
-    }
-    next = candidate;
-  }
-
-  return next.toISOString();
-}
-
-function applyTimezoneOffset(hour, minute, offsetHours) {
-  const totalMinutes = hour * 60 + minute - offsetHours * 60;
-  const normalized = ((totalMinutes % 1440) + 1440) % 1440;
-  return {
-    hour: Math.floor(normalized / 60),
-    minute: normalized % 60,
-  };
-}
+import {
+  computeFirstRun,
+  isValidRepeat,
+  validateRepeatValue,
+} from "../lib/schedule.js";
 
 async function sendToChannel(client, channelId, content) {
   const channel = await client.channels.fetch(channelId);
@@ -91,10 +36,33 @@ async function sendToChannel(client, channelId, content) {
   await channel.send(content);
 }
 
+function mentionsEveryone(message) {
+  return /@everyone|@here/.test(message);
+}
+
+/**
+ * Scheduled messages are sent by the bot later, so the author's own
+ * "Mention Everyone" permission has to be checked at scheduling time.
+ */
+function missingMentionPermission(interaction, message) {
+  return (
+    mentionsEveryone(message) &&
+    !interaction.memberPermissions?.has(PermissionFlagsBits.MentionEveryone)
+  );
+}
+
+const MENTION_PERMISSION_ERROR = createErrorEmbed(
+  "Missing permission",
+  "You need the **Mention Everyone** permission to schedule a message containing `@everyone` or `@here`."
+);
+
 export default {
   data: new SlashCommandBuilder()
     .setName("event")
     .setDescription("Create and manage scheduled events (UTC)")
+    // Events make the bot post to any channel, so keep this to server managers.
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDMPermission(false)
 
     .addSubcommand((sc) =>
       sc
@@ -311,6 +279,10 @@ export default {
         });
       }
 
+      if (missingMentionPermission(interaction, message)) {
+        return interaction.editReply({ embeds: [MENTION_PERMISSION_ERROR] });
+      }
+
       // Validate channel exists
       try {
         const channel = await client.channels.fetch(channelId);
@@ -352,51 +324,30 @@ export default {
         });
       }
 
-      if ((repeat === "weekly" || repeat === "monthly") && repeatValue == null) {
+      const repeatValueError = validateRepeatValue(repeat, repeatValue);
+      if (repeatValueError) {
         return interaction.editReply({
-          embeds: [
-            createErrorEmbed(
-              "Missing repeat value",
-              "repeat_value is required for weekly (0-6) and monthly (1-31)."
-            ),
-          ],
+          embeds: [createErrorEmbed("Invalid repeat value", repeatValueError)],
         });
       }
 
-      if (repeat === "weekly" && (repeatValue < 0 || repeatValue > 6)) {
-        return interaction.editReply({
-          embeds: [createErrorEmbed("Invalid weekly value", "repeat_value must be 0-6 (Sun-Sat).")],
-        });
-      }
-      if (repeat === "monthly" && (repeatValue < 1 || repeatValue > 31)) {
-        return interaction.editReply({
-          embeds: [createErrorEmbed("Invalid monthly value", "repeat_value must be 1-31.")],
-        });
-      }
-
-      const utcTime = applyTimezoneOffset(hour, minute, timezoneOffset);
-      const nextRun = computeInitialNextRunUTC({
-        hour: utcTime.hour,
-        minute: utcTime.minute,
+      const nextRun = computeFirstRun({
+        hour,
+        minute,
         repeatType: repeat,
         repeatValue: repeatValue ?? null,
+        timezoneOffset,
       });
 
-      const id = await addEvent(
+      const id = await addEvent({
         name,
         channelId,
         message,
         nextRun,
-        repeat,
-        repeatValue ?? null
-      );
-
-      if (!id) {
-        logger.error("Failed to create event", "event-command");
-        return interaction.editReply({
-          embeds: [createErrorEmbed("Create failed", "Failed to create the scheduled event.")],
-        });
-      }
+        repeatType: repeat,
+        repeatValue: repeatValue ?? null,
+        timezoneOffset,
+      });
 
       logger.info(`Event created: ${name} (ID: ${id})`, "event-command");
       return interaction.editReply({
@@ -454,6 +405,10 @@ export default {
         });
       }
 
+      if (missingMentionPermission(interaction, message)) {
+        return interaction.editReply({ embeds: [MENTION_PERMISSION_ERROR] });
+      }
+
       if (!isValidRepeat(repeat)) {
         return interaction.editReply({
           embeds: [
@@ -472,25 +427,10 @@ export default {
         repeatValueOption != null;
 
       if (shouldRecalculate) {
-        if ((repeat === "weekly" || repeat === "monthly") && repeatValue == null) {
+        const repeatValueError = validateRepeatValue(repeat, repeatValue);
+        if (repeatValueError) {
           return interaction.editReply({
-            embeds: [
-              createErrorEmbed(
-                "Missing repeat value",
-                "repeat_value is required for weekly (0-6) and monthly (1-31)."
-              ),
-            ],
-          });
-        }
-
-        if (repeat === "weekly" && (repeatValue < 0 || repeatValue > 6)) {
-          return interaction.editReply({
-            embeds: [createErrorEmbed("Invalid weekly value", "repeat_value must be 0-6 (Sun-Sat).")],
-          });
-        }
-        if (repeat === "monthly" && (repeatValue < 1 || repeatValue > 31)) {
-          return interaction.editReply({
-            embeds: [createErrorEmbed("Invalid monthly value", "repeat_value must be 1-31.")],
+            embeds: [createErrorEmbed("Invalid repeat value", repeatValueError)],
           });
         }
       }
@@ -524,23 +464,22 @@ export default {
         });
       }
 
+      const offset = timezoneOffset ?? existing.timezone_offset ?? 0;
+
       const nextRun = (() => {
         if (!shouldRecalculate) {
           return existing.next_run;
         }
-        const baseTime = new Date(existing.next_run);
-        const baseHour = baseTime.getUTCHours();
-        const baseMinute = baseTime.getUTCMinutes();
-        const hour = hourOption ?? baseHour;
-        const minute = minuteOption ?? baseMinute;
-        const offset = timezoneOffset ?? 0;
-        const utcTime = applyTimezoneOffset(hour, minute, offset);
+        // Existing runs are stored in UTC, so read the current time back in the
+        // event's own timezone before applying the requested hour/minute.
+        const localBase = new Date(new Date(existing.next_run).getTime() + offset * 3_600_000);
 
-        return computeInitialNextRunUTC({
-          hour: utcTime.hour,
-          minute: utcTime.minute,
+        return computeFirstRun({
+          hour: hourOption ?? localBase.getUTCHours(),
+          minute: minuteOption ?? localBase.getUTCMinutes(),
           repeatType: repeat,
           repeatValue: repeatValue ?? null,
+          timezoneOffset: offset,
         });
       })();
 
@@ -551,6 +490,7 @@ export default {
         next_run: nextRun,
         repeat_type: repeat,
         repeat_value: repeatValue ?? null,
+        timezone_offset: offset,
       });
 
       logger.info(`Event updated: ${name} (ID: ${id})`, "event-command");
