@@ -14,6 +14,7 @@ export const CONFIG = {
 
   // Database
   MONGODB_URI: process.env.MONGODB_URI,
+  DB_TIMEOUT_MS: Number(process.env.DB_TIMEOUT_MS) || 10_000,
 
   // Scheduler
   CHECK_INTERVAL_MS: Number(process.env.CHECK_INTERVAL_MS) || 60_000, // 1 minute

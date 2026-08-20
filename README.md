@@ -248,6 +248,7 @@ MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/thc-support
 
 # Optional
 PORT=3000                           # HTTP server port (default: 3000)
+DB_TIMEOUT_MS=10000                 # Hard limit per database operation
 LOG_LEVEL=info                      # Levels: error, warn, info, debug
 BACKUP_ENABLED=true                 # Set to "false" to disable snapshots
 BACKUP_INTERVAL_HOURS=24            # Backup frequency (hours)
@@ -309,6 +310,13 @@ Discord invalidated the interaction before the bot answered. Usual causes:
    is your local one — check `/event list`, which always shows UTC
 2. Check if the channel_id exists and is valid
 3. Test with `/event due` to see if there are overdue events
+
+### "Command timed out"
+The database did not answer within `DB_TIMEOUT_MS`. On free hosting this usually
+means the process had been suspended and woke up with a stale connection; a
+heartbeat keeps the pool warm, but the very first query after a long sleep can
+still fail. Run it again, and consider keeping the service awake (UptimeRobot)
+or moving it to a Background Worker.
 
 ### "An event stopped firing"
 After `MAX_SEND_ATTEMPTS` consecutive failures the event is disabled to avoid

@@ -11,7 +11,7 @@ import pingCommand from "./commands/ping.js";
 import { startScheduler, stopScheduler, getDueEvents } from "./scheduler.js";
 import { startBackupSchedule, stopBackupSchedule } from "./backup.js";
 import { isOnCooldown, addCooldown, getRemainingCooldown } from "./rateLimit.js";
-import { connectDatabase, closeDatabase } from "./data/database.js";
+import { connectDatabase, closeDatabase, startDatabaseHeartbeat } from "./data/database.js";
 import { countEvents } from "./data/events.js";
 
 const TOKEN = CONFIG.DISCORD_TOKEN;
@@ -316,6 +316,7 @@ for (const signal of ["SIGTERM", "SIGINT"]) {
 async function main() {
   try {
     await connectDatabase();
+    startDatabaseHeartbeat();
     httpServer = app.listen(PORT, "0.0.0.0", () =>
       logger.info(`Web server online on port ${PORT}`)
     );
