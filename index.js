@@ -197,13 +197,25 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
-  if (interaction.isButton() || interaction.isStringSelectMenu()) {
+  if (
+    interaction.isButton() ||
+    interaction.isStringSelectMenu() ||
+    interaction.isChannelSelectMenu() ||
+    interaction.isModalSubmit()
+  ) {
     if (discordApiIsCoolingDown()) {
       try {
-        await interaction.reply({
-          content: "⏳ Discord ainda está a limitar pedidos. Espera um pouco.",
-          ephemeral: true,
-        });
+        if (interaction.isModalSubmit()) {
+          await interaction.reply({
+            content: "⏳ Discord ainda está a limitar pedidos. Espera um pouco.",
+            flags: MessageFlags.Ephemeral,
+          });
+        } else {
+          await interaction.reply({
+            content: "⏳ Discord ainda está a limitar pedidos. Espera um pouco.",
+            flags: MessageFlags.Ephemeral,
+          });
+        }
       } catch {
         // ignore
       }
@@ -220,7 +232,7 @@ client.on("interactionCreate", async (interaction) => {
           try {
             await interaction.reply({
               content: `❌ ${error?.message || "Action failed"}`,
-              ephemeral: true,
+              flags: MessageFlags.Ephemeral,
             });
           } catch {
             // ignore

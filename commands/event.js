@@ -17,12 +17,12 @@ import {
   createEventPreviewEmbed,
   createEventPreviewListEmbed,
   createHistoryEmbed,
+  createCreatePreviewEmbed,
   createInfoEmbed,
   createSuccessEmbed,
   formatUtc,
 } from "../embeds.js";
 import {
-  addEvent,
   deleteEvent,
   getNextEvent,
   getDueEvents,
@@ -33,7 +33,8 @@ import {
   validateRepeatValue,
 } from "../lib/schedule.js";
 import { answer } from "../lib/respond.js";
-import { buildEventSelectMenu } from "../lib/components.js";
+import { buildEventSelectMenu, buildCreatePreviewComponents } from "../lib/components.js";
+import { saveCreateDraft } from "../lib/drafts.js";
 import { autocompleteEventId, handleEventComponent } from "./eventUi.js";
 
 function idOption(option, { required = true, description = "Event ID" } = {}) {
@@ -81,7 +82,7 @@ export default {
     .addSubcommand((sc) =>
       sc
         .setName("create")
-        .setDescription("Create a new scheduled event")
+        .setDescription("Create an event — opens a live preview to confirm")
         .addStringOption((o) =>
           o.setName("name").setDescription("Event name").setRequired(true)
         )
@@ -360,32 +361,23 @@ export default {
         timezoneOffset,
       });
 
-      const id = await addEvent({
+      const draft = {
         name,
-        channelId,
         message,
-        nextRun,
-        repeatType: repeat,
-        repeatValue: repeatValue ?? null,
+        hour,
+        minute,
         timezoneOffset,
-      });
+        repeat,
+        repeatValue: repeatValue ?? null,
+        channelId,
+        nextRun,
+      };
 
-      logger.info(`Event created: ${name} (ID: ${id})`, "event-command");
-      await appendHistory({
-        eventId: id,
-        eventName: name,
-        action: "created",
-        userId: interaction.user.id,
-      });
+      saveCreateDraft(interaction.user.id, interaction.guildId, draft);
+
       return answer(interaction, {
-        embeds: [
-          createSuccessEmbed(
-            "Event created",
-            `**ID:** #${id}\n**Name:** ${name}\n**Channel:** <#${channelId}>\n**Next run:** ${formatUtc(
-              nextRun
-            )}\n**Repeat:** ${repeat}${repeatValue != null ? ` (${repeatValue})` : ""}`
-          ),
-        ],
+        embeds: [createCreatePreviewEmbed(draft)],
+        components: buildCreatePreviewComponents(draft),
       });
     }
 

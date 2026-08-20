@@ -102,6 +102,43 @@ export function createEventListEmbed(events, { title = "📅 Eventos ativos" } =
   return embed;
 }
 
+export function createCreatePreviewEmbed(draft) {
+  const repeat =
+    `${draft.repeat}` + (draft.repeatValue != null ? ` (${draft.repeatValue})` : "");
+  const offset =
+    draft.timezoneOffset === 0
+      ? "UTC"
+      : `UTC${draft.timezoneOffset > 0 ? "+" : ""}${draft.timezoneOffset}`;
+
+  return new EmbedBuilder()
+    .setTitle(`✨ Preview · ${draft.name}`)
+    .setColor(0xFEE75C)
+    .setDescription(
+      [
+        "Confirma os detalhes antes de gravar o evento.",
+        "",
+        ">>> " + truncate(draft.message, 1800),
+      ].join("\n")
+    )
+    .addFields(
+      { name: "📍 Canal", value: `<#${draft.channelId}>`, inline: true },
+      { name: "🔁 Repetição", value: repeat, inline: true },
+      { name: "🌍 Fuso", value: offset, inline: true },
+      {
+        name: "🕘 Hora pedida",
+        value: `${String(draft.hour).padStart(2, "0")}:${String(draft.minute).padStart(2, "0")} (${offset})`,
+        inline: true,
+      },
+      {
+        name: "⏰ Primeira execução",
+        value: relativeTime(draft.nextRun),
+        inline: false,
+      }
+    )
+    .setFooter({ text: "Podes mudar o canal, a repetição ou a mensagem abaixo" })
+    .setTimestamp();
+}
+
 export function createHistoryEmbed(entries, { title = "📜 Histórico recente" } = {}) {
   const embed = new EmbedBuilder()
     .setTitle(title)
@@ -191,5 +228,6 @@ export default {
   createEventPreviewEmbed,
   createEventPreviewListEmbed,
   createHistoryEmbed,
+  createCreatePreviewEmbed,
   createInfoEmbed,
 };
